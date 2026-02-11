@@ -71,7 +71,7 @@ echo "host    all             all             $ALLOWED_NETWORK         scram-sha
 # 8. Finalização
 echo -e "${BLUE}[5/5] Reiniciando e definindo credenciais...${NC}"
 systemctl restart postgresql
-sudo -u postgres psql -c "ALTER USER postgres WITH PASSWORD '$DB_PASSWORD';"
+su - postgres -c "psql -c \"ALTER USER postgres WITH PASSWORD '$DB_PASSWORD';\""
 
 echo -e "${GREEN}✅ Deploy concluído com sucesso!${NC}"
 echo -e "Versão: $PG_VERSION | Rede: $ALLOWED_NETWORK"
