@@ -28,5 +28,6 @@ apt install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker
 
 # Se tiver CUDA/Nvidia Configurar o Docker para usar a GPU
 ```bash
-nvidia-ctk runtime configure --runtime=docker && systemctl restart docker
+nvidia-ctk runtime configure --runtime=docker
+systemctl restart docker
 ```
