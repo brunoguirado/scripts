@@ -2,7 +2,7 @@ Aqui está o guia técnico detalhado no formato Markdown que documenta a soluç�
 
 ---
 
-# Guia de Instalação: NVIDIA GT 1030 no Proxmox 9 (Trixie/Kernel 6.17)
+# Guia de Instalação: NVIDIA DRIVER no Proxmox 9 (Trixie/Kernel 6.17)
 
 Este documento descreve o procedimento passo a passo para instalar drivers NVIDIA em um ambiente **Debian 13 (Trixie)** com **Kernel 6.17**, superando as incompatibilidades de API que impedem a instalação via repositórios padrão.
 
