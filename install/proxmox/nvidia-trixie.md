@@ -96,7 +96,19 @@ Dentro do LXC, instalamos apenas as bibliotecas de usuário com o mesmo instalad
 
 ```bash
 ./NVIDIA-Linux-x86_64-580.126.09.run --no-kernel-module --no-questions --ui=none
+```
 
+O "Ponte" para a GPU (NVIDIA Container Toolkit)
+```bash
+# Adiciona o repositório do NVIDIA Container Toolkit
+curl -fsSL https://nvidia.github.io/libnvidia-container/gpgkey | gpg --dearmor -o /usr/share/keyrings/nvidia-container-toolkit-keyring.gpg \
+  && curl -s -L https://nvidia.github.io/libnvidia-container/stable/deb/nvidia-container-toolkit.list | \
+    sed 's#deb [^ ]* \(.*\)#deb [signed-by=/usr/share/keyrings/nvidia-container-toolkit-keyring.gpg] https://nvidia.github.io/libnvidia-container/stable/deb/\1#' | \
+    tee /etc/apt/sources.list.d/nvidia-container-toolkit.list
+
+# Instala o Toolkit
+apt update
+apt install -y nvidia-container-toolkit
 ```
 
 ---
