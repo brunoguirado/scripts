@@ -15,3 +15,8 @@ echo \
 # Instala o Docker Engine e Docker Compose
 apt update
 apt install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+
+
+# Se tiver CUDA/Nvidia Configurar o Docker para usar a GPU
+nvidia-ctk runtime configure --runtime=docker
+systemctl restart docker
