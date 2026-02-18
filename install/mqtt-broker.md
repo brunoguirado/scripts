@@ -16,7 +16,7 @@ echo "allow_anonymous false" >> /etc/mosquitto/conf.d/default.conf
 echo "password_file /etc/mosquitto/passwd" >> /etc/mosquitto/conf.d/default.conf
 ```
 3. Criar Usuário e Senha
-4. 
+
 ```bash
 # Cria o arquivo de senha e adiciona o usuário 'admin' (ou o nome que quiser)
 mosquitto_passwd -c /etc/mosquitto/passwd admin
