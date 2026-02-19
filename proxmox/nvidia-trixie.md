@@ -70,7 +70,7 @@ nvidia-smi
 
 ---
 
-## 3. Configuração de Passthrough para LXC (Frigate/NVR)
+## 3. Configuração de Passthrough para LXC
 
 Para que o container acesse a placa, realizamos o mapeamento de hardware no arquivo de configuração do Proxmox.
 

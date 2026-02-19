@@ -1,0 +1,20 @@
+services:
+  viseron:
+    image: roflcoopter/viseron:cuda
+    container_name: viseron
+    restart: unless-stopped
+    privileged: true
+    runtime: nvidia
+    ports:
+      - "8888:8888"
+    volumes:
+      - ./config:/config
+      - ./recordings:/recordings
+      - /etc/localtime:/etc/localtime:ro
+      # Mapeia a GPU explicitamente se o runtime falhar (segurança extra)
+      - /dev/nvidia0:/dev/nvidia0
+      - /dev/nvidiactl:/dev/nvidiactl
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=compute,video,utility
+    shm_size: '2gb'

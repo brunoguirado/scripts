@@ -1,0 +1,54 @@
+version: '3.8'
+
+services:
+  # 1. O Cérebro (Core) - CPU Optimized
+  compreface-core:
+    image: exadel/compreface-core:1.2.0-mobilenet
+    container_name: compreface-core
+    restart: unless-stopped
+    environment:
+      - ML_PORT=3000
+    # O Core é stateless, não precisa de volumes se não usar cache em disco
+
+  # 2. A API (Gateway)
+  compreface-api:
+    image: exadel/compreface-api:latest
+    container_name: compreface-api
+    restart: unless-stopped
+    depends_on:
+      - compreface-core
+    ports:
+      - "8000:8080" # Porta Externa (8000) -> Porta Interna Java (8080)
+    environment:
+      - POSTGRES_USER=compreface
+      - POSTGRES_PASSWORD=SuaSenhaForteDB
+      - POSTGRES_URL=jdbc:postgresql://192.168.1.IP_DO_BANCO:5432/compreface
+      - SPRING_PROFILES_ACTIVE=dev
+      # Garante que a API sabe onde está o Core
+      - COMPREFACE_CORE_HOST=http://compreface-core:3000
+
+  # 3. O Painel Administrativo (Backend)
+  compreface-admin:
+    image: exadel/compreface-admin:latest
+    container_name: compreface-admin
+    restart: unless-stopped
+    environment:
+      - POSTGRES_USER=compreface
+      - POSTGRES_PASSWORD=SuaSenhaForteDB
+      - POSTGRES_URL=jdbc:postgresql://192.168.1.IP_DO_BANCO:5432/compreface
+      - SPRING_PROFILES_ACTIVE=dev
+      - ENABLE_EMAIL_SERVER=false
+
+  # 4. A Interface Visual (Frontend Nginx)
+  compreface-ui:
+    image: exadel/compreface-ui:latest
+    container_name: compreface-ui
+    restart: unless-stopped
+    depends_on:
+      - compreface-api 
+      - compreface-admin
+    ports:
+      - "80:80" # Acesso HTTP direto
+    environment:
+      # ATENÇÃO: Troque pelo IP deste LXC do CompreFace (Não use localhost)
+      - API_URL=http://192.168.1.IP_DESTE_LXC:8000/api

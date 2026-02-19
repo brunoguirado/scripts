@@ -1,0 +1,98 @@
+# --- CONFIGURAÇÃO DE SISTEMA ---
+logging:
+  level: info
+
+database:
+  type: sqlite
+
+nvr:
+  path: /recordings
+  retention:
+    days: 0
+
+ffmpeg:
+  hwaccel_args:
+    - -hwaccel
+    - cuda
+    - -hwaccel_output_format
+    - cuda
+
+# --- DETECTOR DE OBJETOS ---
+object_detector:
+  type: darknet
+  model_path: /config/models/yolov7-tiny.weights
+  config_path: /config/models/yolov7-tiny.cfg
+  label_path: /config/models/coco.names
+  dnn_backend: cuda
+  dnn_target: cuda
+  labels:
+    - label: person
+      confidence: 0.65
+    - label: car
+      confidence: 0.70
+
+# --- NOTIFICAÇÃO (MQTT) ---
+mqtt:
+  broker: 192.168.X.X # <--- COLOQUE O IP DO SEU LXC MOSQUITTO AQUI
+  port: 1883
+  username: mqtt_user
+  password: mqtt_pass
+  home_assistant:
+    enable: true
+    discovery_prefix: homeassistant
+
+# --- CONFIGURAÇÃO DO COMPREFACE ---
+face_recognition:
+  type: compreface
+  host: 192.168.1.IP_DO_LXC_COMPREFACE # <--- IP DO LXC
+  port: 8000
+  recognition_api_key: "VAMOS_PEGAR_ISSO_DEPOIS" 
+  train: false 
+
+# --- MOLDE DE CÂMERA (TEMPLATE) ---
+defaults: &nvr
+  host: 192.168.X.X # IP do DVR/NVR se for unico, ou sobrescreva nas câmeras
+  port: 554
+  username: USER_NAME
+  password: PASS
+  
+  # Estes valores agora pertencem ao molde
+  fps: 5
+  width: 704
+  height: 480
+  
+  recorder:
+    enable: false
+  
+  mqtt:
+    enable: true
+
+# --- CÂMERAS ---
+cameras:
+  - name: cam1
+    <<: *nvr
+    path: /cam/realmonitor?channel=1&subtype=1&unicast=true
+ 
+  - name: cam2
+    <<: *nvr
+    path: /cam/realmonitor?channel=2&subtype=1&unicast=true
+
+  - name: cam3
+    <<: *nvr
+    path: /cam/realmonitor?channel=3&subtype=1&unicast=true
+
+    # Ativa Face Recognition apenas nesta câmera
+    object_detector:
+      labels:
+        - label: person
+          confidence: 0.75
+          trigger_recorder: false
+          post_processor: face_recognition
+  
+  - name: cam4
+    <<: *nvr
+    path: /cam/realmonitor?channel=4&subtype=1&unicast=true
+
+  - name: cam5
+    <<: *nvr
+    path: /cam/realmonitor?channel=5&subtype=1&unicast=true
