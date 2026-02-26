@@ -10,10 +10,11 @@ services:
     volumes:
       - ./config:/config
       - ./recordings:/recordings
+      - ./recordings/segments:/segments
+      - ./recordings/events:/event_clips
+      - ./recordings/thumbnails:/thumbnails
+      - ./recordings/snapshots:/snapshots
       - /etc/localtime:/etc/localtime:ro
-      # Mapeia a GPU explicitamente se o runtime falhar (segurança extra)
-      - /dev/nvidia0:/dev/nvidia0
-      - /dev/nvidiactl:/dev/nvidiactl
     environment:
       - NVIDIA_VISIBLE_DEVICES=all
       - NVIDIA_DRIVER_CAPABILITIES=compute,video,utility
