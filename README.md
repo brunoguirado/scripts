@@ -1,1 +1,3 @@
-# servers
+# Scripts
+
+install and configure scripts
