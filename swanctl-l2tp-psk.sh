@@ -51,3 +51,62 @@ cat <<EOF > /etc/xl2tpd/xl2tpd.conf
 [lac $CONN_NAME]
 lns = $REMOTE_IP
 ppp debug = yes
+pppoptfile = /etc/ppp/options.l2tpd.$CONN_NAME
+length bit = yes
+EOF
+
+# 4. Configure pppd (Authentication and parameters)
+cat <<EOF > /etc/ppp/options.l2tpd.$CONN_NAME
+ipcp-accept-local
+ipcp-accept-remote
+refuse-eap
+require-mschap-v2
+noccp
+noauth
+mtu 1410
+mru 1410
+usepeerdns
+connect-delay 5000
+name $VPN_USER
+password $VPN_PASS
+EOF
+
+# 5. Create dynamic routing hooks for the target subnet
+cat <<EOF > /etc/ppp/ip-up.d/${CONN_NAME}-route
+#!/bin/bash
+# Automatically add route when the VPN interface goes up
+if [ "\$PPP_IFACE" == "ppp0" ]; then
+    ip route add $TARGET_SUBNET dev \$PPP_IFACE
+fi
+EOF
+chmod +x /etc/ppp/ip-up.d/${CONN_NAME}-route
+
+cat <<EOF > /etc/ppp/ip-down.d/${CONN_NAME}-route
+#!/bin/bash
+# Automatically remove route when the VPN interface goes down
+if [ "\$PPP_IFACE" == "ppp0" ]; then
+    ip route del $TARGET_SUBNET dev \$PPP_IFACE
+fi
+EOF
+chmod +x /etc/ppp/ip-down.d/${CONN_NAME}-route
+
+# 6. Apply configurations and restart services
+echo "Starting modern services..."
+
+# Enable and start the modern daemon natively
+systemctl enable --now strongswan xl2tpd
+systemctl restart strongswan xl2tpd
+
+# Brief pause to ensure the vici socket is fully created
+sleep 2
+
+# Load configurations into the charon-systemd daemon
+swanctl --load-all
+
+echo "---------------------------------------------------------"
+echo "Deployment Complete!"
+echo "To connect:    echo 'c $CONN_NAME' > /var/run/xl2tpd/l2tp-control"
+echo "To disconnect: echo 'd $CONN_NAME' > /var/run/xl2tpd/l2tp-control"
+echo "To check IPsec status: swanctl --list-sas"
+echo "---------------------------------------------------------"
+
