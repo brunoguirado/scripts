@@ -123,7 +123,3 @@ apt install -y nvidia-container-toolkit
 ## 4. Veredito Técnico
 
 A utilização do instalador oficial com suporte a **DKMS** em vez dos pacotes do repositório Trixie garantiu a estabilidade do sistema, evitando a remoção acidental de componentes vitais do Proxmox e permitindo a aceleração total via **CUDA 13.0**.
-
----
-
-**Deseja que eu te ajude agora a configurar os parâmetros de detecção TensorRT no seu arquivo `config.yml` do Frigate para aproveitar os 2GB da sua placa?**
