@@ -89,6 +89,7 @@ manage_user() {
     # ~* (all keys) &* (all channels) +@all (all commands)
     # Recommended for Infisical: +@all (since it manages its own keys)
     redis-cli -a "$ADMIN_PASS" --no-auth-warning ACL SETUSER "$USERNAME" on ">$USERPASS" "~*" "&*" "+@all"
+    redis-cli -a "$ADMIN_PASS" --no-auth-warning CONFIG REWRITE >/dev/null || true
     success "Usuário $USERNAME criado/atualizado com sucesso."
 }
 
@@ -99,6 +100,7 @@ delete_user() {
         error "Não é possível excluir o usuário 'default'."
     fi
     redis-cli -a "$ADMIN_PASS" --no-auth-warning ACL DELUSER "$USERNAME"
+    redis-cli -a "$ADMIN_PASS" --no-auth-warning CONFIG REWRITE >/dev/null || true
     success "Usuário $USERNAME removido."
 }
 
