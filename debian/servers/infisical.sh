@@ -15,10 +15,8 @@ set -euo pipefail
 # --- Configuration & Defaults ---
 export DEBIAN_FRONTEND=noninteractive
 LOG_FILE="/var/log/infisical-install.log"
-INFISICAL_USER="infisical"
-INFISICAL_DIR="/opt/infisical"
-NODE_VERSION="20" # Node.js LTS (v20)
-ENV_FILE="${INFISICAL_DIR}/.env"
+# The native package runs as infisical user and reads environment from:
+ENV_FILE="/etc/infisical/infisical.env"
 
 # Colors for output
 RED='\033[0;31m'
@@ -52,28 +50,7 @@ check_root() {
     fi
 }
 
-# --- Helper to run commands as the infisical user ---
-# This avoids hard dependency on 'sudo' by using 'su' as a fallback.
-run_as_user() {
-    local cmd="$1"
-    # We are already root (checked in check_root), so we use 'su' to drop privileges
-    # to the infisical user. This avoids any dependency on 'sudo'.
-    su -s /bin/bash -c "$cmd" "$INFISICAL_USER"
-}
 
-# Detect Memory and set NODE_OPTIONS
-detect_memory() {
-    local total_mem_kb
-    total_mem_kb=$(grep MemTotal /proc/meminfo | awk '{print $2}')
-    local total_mem_mb=$((total_mem_kb / 1024))
-    
-    # Calculate ~85% of RAM for Node.js, minimum 128MB, maximum 4096 (unless server is huge)
-    local node_mem=$(( (total_mem_mb * 85) / 100 ))
-    if [ "$node_mem" -lt 128 ]; then node_mem=128; fi
-    
-    NODE_MAX_OLD_SPACE=$node_mem
-    log "Memory detected: ${total_mem_mb}MB. Setting Node.js max-old-space-size to ${NODE_MAX_OLD_SPACE}MB."
-}
 
 generate_secret() {
     openssl rand -hex 32
@@ -82,29 +59,18 @@ generate_secret() {
 # --- Installation Steps ---
 
 install_dependencies() {
-    log "Updating system and installing essential build dependencies..."
+    log "Updating system and installing essential native dependencies..."
     apt-get update && apt-get install -y \
         curl \
-        git \
-        build-essential \
-        python3 \
-        pkg-config \
-        libssl-dev \
-        ca-certificates \
-        gnupg \
-        openssl \
-        jq \
-        netcat-openbsd \
         postgresql-client \
         redis-tools \
         | tee -a "$LOG_FILE" || error "Failed to install base dependencies"
 
-    log "Installing Node.js v${NODE_VERSION} LTS..."
-    curl -fsSL https://deb.nodesource.com/setup_${NODE_VERSION}.x | bash -
-    apt-get install -y nodejs | tee -a "$LOG_FILE" || error "Failed to install Node.js"
-    
-    log "Node.js version: $(node -v)"
-    log "NPM version: $(npm -v)"
+    log "Adding official Infisical APT repository..."
+    curl -1sLf 'https://dl.cloudsmith.io/public/infisical/infisical-oss/setup.deb.sh' | bash | tee -a "$LOG_FILE" || error "Failed to add Infisical repository"
+
+    log "Installing Infisical native package..."
+    apt-get update && apt-get install -y infisical | tee -a "$LOG_FILE" || error "Failed to install Infisical package"
 }
 
 configure_parameters() {
@@ -201,47 +167,10 @@ validate_connectivity() {
     success "Pre-flight checks passed!"
 }
 
-prepare_environment() {
-    log "Creating infisical user and directory..."
-    if ! id "$INFISICAL_USER" &>/dev/null; then
-        useradd -m -s /bin/bash "$INFISICAL_USER"
-    fi
 
-    mkdir -p "$INFISICAL_DIR"
-    chown "$INFISICAL_USER":"$INFISICAL_USER" "$INFISICAL_DIR"
-}
-
-clone_and_install() {
-    log "Cloning Infisical repository..."
-    cd "$INFISICAL_DIR"
-    
-    # Cleanup if directory is not empty
-    if [ -d ".git" ]; then
-        warn "Directory $INFISICAL_DIR already contains a git repo. Pulling latest..."
-        run_as_user "git pull"
-    else
-        run_as_user "git clone https://github.com/Infisical/infisical.git ."
-    fi
-
-    log "Installing NPM dependencies (this may take a few minutes)..."
-    # Dynamic memory optimization for NPM build
-    export NODE_OPTIONS="--max-old-space-size=${NODE_MAX_OLD_SPACE}"
-    
-    # Install root dependencies (for workspaces/husky)
-    run_as_user "npm install --include=dev" 2>&1 | tee -a "$LOG_FILE" || warn "Root NPM install had issues, continuing..."
-    
-    log "Building the project (Backend)..."
-    cd "${INFISICAL_DIR}/backend"
-    
-    # Install backend dependencies specifically to ensure tools like tsup are available locally
-    run_as_user "npm install --include=dev" 2>&1 | tee -a "$LOG_FILE" || error "Backend NPM install failed"
-    
-    # Run the build
-    run_as_user "npm run build" 2>&1 | tee -a "$LOG_FILE" || error "NPM build failed"
-}
 
 setup_env_file() {
-    log "Configuring .env file..."
+    log "Configuring environment file at $ENV_FILE..."
     cat <<EOF > "$ENV_FILE"
 # Infrastructure
 NODE_ENV=production
@@ -254,49 +183,25 @@ ENCRYPTION_KEY=${ENCRYPTION_KEY}
 JWT_SECRET=${JWT_SECRET}
 ROOT_ENCRYPTION_KEY=${ROOT_ENCRYPTION_KEY}
 
-# Optimization dynamic detection
-NODE_OPTIONS="--max-old-space-size=${NODE_MAX_OLD_SPACE}"
-
 # Optional: Adjust if using mail
 # SMTP_HOST=
 # SMTP_PORT=
 # SMTP_USERNAME=
 # SMTP_PASSWORD=
 EOF
-    chown "$INFISICAL_USER":"$INFISICAL_USER" "$ENV_FILE"
+    # The native package creates the 'infisical' user automatically
+    chown infisical:infisical "$ENV_FILE"
     chmod 600 "$ENV_FILE"
 }
 
 run_migrations() {
-    log "Running database migrations..."
-    cd "${INFISICAL_DIR}/backend"
-    run_as_user "npm run migration:latest" 2>&1 | tee -a "$LOG_FILE" || error "Migrations failed"
+    log "Running database migrations via infisical-ctl..."
+    infisical-ctl db migrate | tee -a "$LOG_FILE" || error "Migrations failed"
 }
 
 setup_systemd() {
-    log "Setting up systemd service..."
-    cat <<EOF > /etc/systemd/system/infisical.service
-[Unit]
-Description=Infisical Standalone Service
-After=network.target
-
-[Service]
-Type=simple
-User=${INFISICAL_USER}
-WorkingDirectory=${INFISICAL_DIR}/backend
-EnvironmentFile=${ENV_FILE}
-Environment=NODE_OPTIONS="--max-old-space-size=${NODE_MAX_OLD_SPACE}"
-ExecStart=/usr/bin/npm start
-Restart=always
-RestartSec=10
-StandardOutput=syslog
-StandardError=syslog
-SyslogIdentifier=infisical
-
-[Install]
-WantedBy=multi-user.target
-EOF
-
+    log "Enabling and starting the native Infisical service..."
+    # The package already installed /etc/systemd/system/infisical.service
     systemctl daemon-reload
     systemctl enable infisical
     systemctl restart infisical || error "Failed to start Infisical service"
@@ -330,12 +235,9 @@ main() {
     check_root
     log "Starting Infisical Standalone installation for LXC..."
     
-    detect_memory
     install_dependencies
     configure_parameters
     validate_connectivity
-    prepare_environment
-    clone_and_install
     setup_env_file
     run_migrations
     setup_systemd
