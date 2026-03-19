@@ -226,10 +226,17 @@ clone_and_install() {
     log "Installing NPM dependencies (this may take a few minutes)..."
     # Dynamic memory optimization for NPM build
     export NODE_OPTIONS="--max-old-space-size=${NODE_MAX_OLD_SPACE}"
-    run_as_user "npm install --include=dev" 2>&1 | tee -a "$LOG_FILE" || error "NPM install failed"
+    
+    # Install root dependencies (for workspaces/husky)
+    run_as_user "npm install --include=dev" 2>&1 | tee -a "$LOG_FILE" || warn "Root NPM install had issues, continuing..."
     
     log "Building the project (Backend)..."
     cd "${INFISICAL_DIR}/backend"
+    
+    # Install backend dependencies specifically to ensure tools like tsup are available locally
+    run_as_user "npm install --include=dev" 2>&1 | tee -a "$LOG_FILE" || error "Backend NPM install failed"
+    
+    # Run the build
     run_as_user "npm run build" 2>&1 | tee -a "$LOG_FILE" || error "NPM build failed"
 }
 
