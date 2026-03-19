@@ -226,9 +226,10 @@ clone_and_install() {
     log "Installing NPM dependencies (this may take a few minutes)..."
     # Dynamic memory optimization for NPM build
     export NODE_OPTIONS="--max-old-space-size=${NODE_MAX_OLD_SPACE}"
-    run_as_user "npm install --production --include=dev" 2>&1 | tee -a "$LOG_FILE" || error "NPM install failed"
+    run_as_user "npm install --include=dev" 2>&1 | tee -a "$LOG_FILE" || error "NPM install failed"
     
-    log "Building the project..."
+    log "Building the project (Backend)..."
+    cd "${INFISICAL_DIR}/backend"
     run_as_user "npm run build" 2>&1 | tee -a "$LOG_FILE" || error "NPM build failed"
 }
 
@@ -261,8 +262,8 @@ EOF
 
 run_migrations() {
     log "Running database migrations..."
-    cd "$INFISICAL_DIR"
-    run_as_user "npm run migration:run" 2>&1 | tee -a "$LOG_FILE" || error "Migrations failed"
+    cd "${INFISICAL_DIR}/backend"
+    run_as_user "npm run migration:latest" 2>&1 | tee -a "$LOG_FILE" || error "Migrations failed"
 }
 
 setup_systemd() {
@@ -275,7 +276,7 @@ After=network.target
 [Service]
 Type=simple
 User=${INFISICAL_USER}
-WorkingDirectory=${INFISICAL_DIR}
+WorkingDirectory=${INFISICAL_DIR}/backend
 EnvironmentFile=${ENV_FILE}
 Environment=NODE_OPTIONS="--max-old-space-size=${NODE_MAX_OLD_SPACE}"
 ExecStart=/usr/bin/npm start
