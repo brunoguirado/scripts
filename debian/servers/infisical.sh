@@ -206,6 +206,8 @@ final_output() {
     echo -e "\n${BLUE}Status do Serviço:${NC}"
     infisical-ctl status
     echo -e "\n${BLUE}Logs podem ser acompanhados executando:${NC} infisical-ctl tail"
+    echo -e "\n${YELLOW}Integração nas Aplicações (CLI):${NC}"
+    echo -e "Acesse a documentação do CLI: https://infisical.com/docs/cli/overview"
     echo -e "${GREEN}####################################################${NC}\n"
 }
 
