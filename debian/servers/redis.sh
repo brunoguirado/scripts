@@ -2,9 +2,19 @@
 
 # Redis Optimized Installation & ACL Management Tool
 # Role: Senior DevSecOps Engineer
-# Features: Hardening, Dynamic Memory, ACL User Management
 
 set -euo pipefail
+
+# --- Pre-flight Shell Checks (Safe & Early) ---
+if [[ $EUID -ne 0 ]]; then
+    echo -e "\033[0;31m[ERRO]\033[0m Este script deve ser executado como root (use sudo)."
+    exit 1
+fi
+
+if [ -z "${BASH_VERSION:-}" ]; then
+    echo "ERRO: Este script deve ser executado com BASH (use: bash script.sh)." >&2
+    exit 1
+fi
 
 # --- Configuration ---
 LOG_FILE="/var/log/redis-install.log"
@@ -19,12 +29,23 @@ NC='\033[0m'
 
 # --- Helper Functions ---
 
-log() { echo -e "${BLUE}[$(date +'%Y-%m-%d %H:%M:%S')]${NC} $1" | tee -a "$LOG_FILE"; }
-success() { echo -e "${GREEN}[SUCCESS]${NC} $1" | tee -a "$LOG_FILE"; }
-error() { echo -e "${RED}[ERROR]${NC} $1" | tee -a "$LOG_FILE" >&2; exit 1; }
+log() { 
+    local msg="[$(date +'%Y-%m-%d %H:%M:%S')] $1"
+    echo -e "${BLUE}${msg}${NC}"
+    echo "${msg}" >> "$LOG_FILE" 2>/dev/null || true
+}
 
-check_root() {
-    [[ $EUID -ne 0 ]] && error "This script must be run as root."
+success() { 
+    local msg="[SUCCESS] $1"
+    echo -e "${GREEN}${msg}${NC}"
+    echo "${msg}" >> "$LOG_FILE" 2>/dev/null || true
+}
+
+error() { 
+    local msg="[ERROR] $1"
+    echo -e "${RED}${msg}${NC}" >&2
+    echo "${msg}" >> "$LOG_FILE" 2>/dev/null || true
+    exit 1
 }
 
 generate_password() {
@@ -136,7 +157,7 @@ EOF
 # --- Main ---
 
 main() {
-    check_root
+    echo -e "${BLUE}Iniciando Ferramenta de Gestão Redis...${NC}"
     
     if command -v redis-server &>/dev/null; then
         echo -e "${GREEN}Instalação do Redis detectada!${NC}"
