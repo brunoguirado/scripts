@@ -137,7 +137,14 @@ configure_parameters() {
         fi
     fi
 
-    [[ -z "${SITE_URL:-}" ]] && read -p "Enter Infisical Site URL (e.g., https://infisical.example.com): " SITE_URL
+    # Detect IP for default SITE_URL
+    local server_ip=$(hostname -I | awk '{print $1}' || echo "localhost")
+    local default_site_url="http://${server_ip}:8080"
+    
+    if [[ -z "${SITE_URL:-}" ]]; then
+        read -p "Enter Infisical Site URL [$default_site_url]: " SITE_URL
+        SITE_URL=${SITE_URL:-$default_site_url}
+    fi
 
     if [[ -z "$DB_URL" || -z "$REDIS_URL" || -z "$SITE_URL" ]]; then
         error "Missing required parameters (DB_URL, REDIS_URL, or SITE_URL)"
