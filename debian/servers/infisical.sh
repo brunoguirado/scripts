@@ -8,15 +8,15 @@
 # - Granular RDS/Redis config prompts with auto-URL construction.
 # - Pre-flight credential validation via native tools (psql/redis-cli).
 # - Portable user switching (works on minimal LXC without sudo).
-# - Config persistence (loads existing .env to skip redundant prompts).
+# - Native Linux Package deployment via infisical-core
 
 set -euo pipefail
 
 # --- Configuration & Defaults ---
 export DEBIAN_FRONTEND=noninteractive
 LOG_FILE="/var/log/infisical-install.log"
-# The native package runs as infisical user and reads environment from:
-ENV_FILE="/etc/infisical/infisical.env"
+# The native package now uses a Ruby config file:
+CONF_FILE="/etc/infisical/infisical.rb"
 
 # Colors for output
 RED='\033[0;31m'
@@ -50,10 +50,12 @@ check_root() {
     fi
 }
 
+generate_hex() {
+    openssl rand -hex 16
+}
 
-
-generate_secret() {
-    openssl rand -hex 32
+generate_base64() {
+    openssl rand -base64 32
 }
 
 # --- Installation Steps ---
@@ -69,23 +71,21 @@ install_dependencies() {
     log "Adding official Infisical APT repository..."
     curl -1sLf 'https://artifacts-infisical-core.infisical.com/setup.deb.sh' | bash | tee -a "$LOG_FILE" || error "Failed to add Infisical repository"
 
-    log "Installing Infisical native package..."
-    apt-get update && apt-get install -y infisical | tee -a "$LOG_FILE" || error "Failed to install Infisical package"
+    log "Installing Infisical native package (infisical-core)..."
+    apt-get update && apt-get install -y infisical-core | tee -a "$LOG_FILE" || error "Failed to install infisical-core package"
 }
 
 configure_parameters() {
     echo -e "${YELLOW}--- Infisical Configuration ---${NC}"
     
     # Load existing config if available to allow re-runs
-    if [[ -f "$ENV_FILE" ]]; then
-        log "Existing environment file found at ${ENV_FILE}. Loading values..."
-        # Only set if not already set by env vars
-        [[ -z "${DB_URL:-}" ]] && DB_URL=$(grep "^DB_URL=" "$ENV_FILE" | cut -d'=' -f2- || echo "")
-        [[ -z "${REDIS_URL:-}" ]] && REDIS_URL=$(grep "^REDIS_URL=" "$ENV_FILE" | cut -d'=' -f2- || echo "")
-        [[ -z "${SITE_URL:-}" ]] && SITE_URL=$(grep "^SITE_URL=" "$ENV_FILE" | cut -d'=' -f2- || echo "")
-        [[ -z "${ENCRYPTION_KEY:-}" ]] && ENCRYPTION_KEY=$(grep "^ENCRYPTION_KEY=" "$ENV_FILE" | cut -d'=' -f2- || echo "")
-        [[ -z "${JWT_SECRET:-}" ]] && JWT_SECRET=$(grep "^JWT_SECRET=" "$ENV_FILE" | cut -d'=' -f2- || echo "")
-        [[ -z "${ROOT_ENCRYPTION_KEY:-}" ]] && ROOT_ENCRYPTION_KEY=$(grep "^ROOT_ENCRYPTION_KEY=" "$ENV_FILE" | cut -d'=' -f2- || echo "")
+    if [[ -f "$CONF_FILE" ]]; then
+        log "Existing configuration file found at ${CONF_FILE}. Loading values..."
+        [[ -z "${DB_URL:-}" ]] && DB_URL=$(grep "infisical_core\['DB_CONNECTION_URI'\]" "$CONF_FILE" | awk -F"'" '{print $4}' || echo "")
+        [[ -z "${REDIS_URL:-}" ]] && REDIS_URL=$(grep "infisical_core\['REDIS_URL'\]" "$CONF_FILE" | awk -F"'" '{print $4}' || echo "")
+        [[ -z "${SITE_URL:-}" ]] && SITE_URL=$(grep "infisical_core\['SITE_URL'\]" "$CONF_FILE" | awk -F"'" '{print $4}' || echo "")
+        [[ -z "${ENCRYPTION_KEY:-}" ]] && ENCRYPTION_KEY=$(grep "infisical_core\['ENCRYPTION_KEY'\]" "$CONF_FILE" | awk -F"'" '{print $4}' || echo "")
+        [[ -z "${AUTH_SECRET:-}" ]] && AUTH_SECRET=$(grep "infisical_core\['AUTH_SECRET'\]" "$CONF_FILE" | awk -F"'" '{print $4}' || echo "")
     fi
 
     # --- PostgreSQL Configuration ---
@@ -101,9 +101,6 @@ configure_parameters() {
         read -p "Database Name [infisical]: " DB_NAME
         DB_NAME=${DB_NAME:-infisical}
         
-        # Construct DB_URL: postgresql://user:pass@host:port/db
-        # URL encoding password if it contains special characters would be ideal, 
-        # but for simple cases this works:
         DB_URL="postgresql://${DB_USER}:${DB_PASS}@${DB_HOST}:${DB_PORT}/${DB_NAME}"
     fi
 
@@ -129,7 +126,6 @@ configure_parameters() {
         fi
     fi
 
-    # Detect IP for default SITE_URL
     local server_ip=$(hostname -I | awk '{print $1}' || echo "localhost")
     local default_site_url="http://${server_ip}:8080"
     
@@ -143,13 +139,12 @@ configure_parameters() {
     fi
 
     # Auto-generate security keys if not provided
-    ENCRYPTION_KEY=${ENCRYPTION_KEY:-$(generate_secret)}
-    JWT_SECRET=${JWT_SECRET:-$(generate_secret)}
-    ROOT_ENCRYPTION_KEY=${ROOT_ENCRYPTION_KEY:-$(generate_secret)}
+    ENCRYPTION_KEY=${ENCRYPTION_KEY:-$(generate_hex)}
+    AUTH_SECRET=${AUTH_SECRET:-$(generate_base64)}
 }
 
 validate_connectivity() {
-    log "Performing pre-flight connectivity and credential checks..."
+    log "Performing pre-flight connectivity checks..."
 
     log "Verifying PostgreSQL connection..."
     if ! PGPASSWORD="" psql "$DB_URL" -c "SELECT 1" &>/dev/null; then
@@ -158,7 +153,6 @@ validate_connectivity() {
     success "PostgreSQL connection verified."
 
     log "Verifying Redis connection..."
-    # Using redis-cli -u to support connection URI
     if ! redis-cli -u "$REDIS_URL" PING | grep -q "PONG"; then
         error "Failed to connect to Redis. Check host, port, and password if provided."
     fi
@@ -167,44 +161,28 @@ validate_connectivity() {
     success "Pre-flight checks passed!"
 }
 
-
-
-setup_env_file() {
-    log "Configuring environment file at $ENV_FILE..."
-    cat <<EOF > "$ENV_FILE"
+setup_conf_file() {
+    log "Configuring environment file at $CONF_FILE..."
+    
+    # Ensure directory exists before writing
+    mkdir -p "$(dirname "$CONF_FILE")"
+    
+    cat <<EOF > "$CONF_FILE"
 # Infrastructure
-NODE_ENV=production
-DB_URL=${DB_URL}
-REDIS_URL=${REDIS_URL}
-SITE_URL=${SITE_URL}
+infisical_core['DB_CONNECTION_URI'] = '${DB_URL//\'/\\\'}'
+infisical_core['REDIS_URL'] = '${REDIS_URL//\'/\\\'}'
+infisical_core['SITE_URL'] = '${SITE_URL//\'/\\\'}'
 
 # Security
-ENCRYPTION_KEY=${ENCRYPTION_KEY}
-JWT_SECRET=${JWT_SECRET}
-ROOT_ENCRYPTION_KEY=${ROOT_ENCRYPTION_KEY}
-
-# Optional: Adjust if using mail
-# SMTP_HOST=
-# SMTP_PORT=
-# SMTP_USERNAME=
-# SMTP_PASSWORD=
+infisical_core['ENCRYPTION_KEY'] = '${ENCRYPTION_KEY//\'/\\\'}'
+infisical_core['AUTH_SECRET'] = '${AUTH_SECRET//\'/\\\'}'
 EOF
-    # The native package creates the 'infisical' user automatically
-    chown infisical:infisical "$ENV_FILE"
-    chmod 600 "$ENV_FILE"
+    chmod 600 "$CONF_FILE"
 }
 
-run_migrations() {
-    log "Running database migrations via infisical-ctl..."
-    infisical-ctl db migrate | tee -a "$LOG_FILE" || error "Migrations failed"
-}
-
-setup_systemd() {
-    log "Enabling and starting the native Infisical service..."
-    # The package already installed /etc/systemd/system/infisical.service
-    systemctl daemon-reload
-    systemctl enable infisical
-    systemctl restart infisical || error "Failed to start Infisical service"
+reconfigure_infisical() {
+    log "Applying configuration and starting Infisical..."
+    infisical-ctl reconfigure | tee -a "$LOG_FILE" || error "infisical-ctl reconfigure failed"
 }
 
 final_output() {
@@ -219,13 +197,12 @@ final_output() {
     echo -e "\n${BLUE}Detalhes do Acesso:${NC}"
     echo -e "URL: ${SITE_URL}"
     echo -e "Acesso Interno: http://${IP_ADDRESS}:8080"
-    echo -e "\n${YELLOW}Credenciais Geradas (Guarde-as com segurança!):${NC}"
+    echo -e "\n${YELLOW}Credenciais Geradas (Guarde-as com segurança em $CONF_FILE!):${NC}"
     echo -e "ENCRYPTION_KEY: ${ENCRYPTION_KEY}"
-    echo -e "JWT_SECRET: ${JWT_SECRET}"
-    echo -e "ROOT_ENCRYPTION_KEY: ${ROOT_ENCRYPTION_KEY}"
+    echo -e "AUTH_SECRET: ${AUTH_SECRET}"
     echo -e "\n${BLUE}Status do Serviço:${NC}"
-    systemctl status infisical --no-pager | grep "Active:"
-    echo -e "\n${BLUE}Logs podem ser acompanhados em:${NC} journalctl -u infisical -f"
+    infisical-ctl status
+    echo -e "\n${BLUE}Logs podem ser acompanhados executando:${NC} infisical-ctl tail"
     echo -e "${GREEN}####################################################${NC}\n"
 }
 
@@ -238,9 +215,8 @@ main() {
     install_dependencies
     configure_parameters
     validate_connectivity
-    setup_env_file
-    run_migrations
-    setup_systemd
+    setup_conf_file
+    reconfigure_infisical
     final_output
 }
 
