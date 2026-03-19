@@ -28,7 +28,7 @@ chmod 700 "$SSH_DIR"
 
 # 3. Input Public Key
 echo "Paste the SSH Public Key (starts with ssh-rsa/ssh-ed25519) and press ENTER:"
-read -r PUB_KEY
+read -r PUB_KEY < /dev/tty
 
 if [[ -n "$PUB_KEY" ]]; then
     echo "$PUB_KEY" > "$AUTH_KEYS"

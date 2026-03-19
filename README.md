@@ -102,6 +102,22 @@ sudo bash debian/postgresql.sh
 sudo dscacheutil -flushcache; sudo killall -HUP mDNSResponder
 ```
 
+## 🌍 Remote Execution (No-clone)
+
+For quick setups on fresh servers, you can run any script directly from GitHub without cloning the entire repository:
+
+```bash
+# General format (replace <PATH_TO_SCRIPT>)
+bash <(curl -sSL https://raw.githubusercontent.com/brunoguirado/scripts/main/<PATH_TO_SCRIPT>)
+
+# Example: Interactive User Creation (Safe for inputs)
+bash <(curl -sSL https://raw.githubusercontent.com/brunoguirado/scripts/main/debian/create-user.sh)
+```
+
+> [!TIP]
+> **Interactivity Fix:** If a script uses `read` and you are piping it (`curl | bash`), it might fail. Use the `bash <(curl ...)` syntax above or ensure the script uses `read ... < /dev/tty`.
+
+
 > [!IMPORTANT]
 > Most Debian scripts require **root privileges**. Always review scripts before running with `sudo`.
 
