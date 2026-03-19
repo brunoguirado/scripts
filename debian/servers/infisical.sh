@@ -67,7 +67,7 @@ install_dependencies() {
         | tee -a "$LOG_FILE" || error "Failed to install base dependencies"
 
     log "Adding official Infisical APT repository..."
-    curl -1sLf 'https://dl.cloudsmith.io/public/infisical/infisical-oss/setup.deb.sh' | bash | tee -a "$LOG_FILE" || error "Failed to add Infisical repository"
+    curl -1sLf 'https://artifacts-infisical-core.infisical.com/setup.deb.sh' | bash | tee -a "$LOG_FILE" || error "Failed to add Infisical repository"
 
     log "Installing Infisical native package..."
     apt-get update && apt-get install -y infisical | tee -a "$LOG_FILE" || error "Failed to install Infisical package"
