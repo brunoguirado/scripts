@@ -143,7 +143,7 @@ install_redis() {
 # --- Senior DevSecOps Hardening ---
 requirepass ${REDIS_PASSWORD}
 maxmemory ${REDIS_MAX_MEM}mb
-maxmemory-policy allkeys-lru
+maxmemory-policy noeviction
 appendonly yes
 EOF
     sed -i "s/^bind .*/bind 0.0.0.0/g" "$REDIS_CONF"
