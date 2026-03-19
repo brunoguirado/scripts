@@ -81,6 +81,8 @@ install_dependencies() {
         openssl \
         jq \
         netcat-openbsd \
+        postgresql-client \
+        redis-tools \
         | tee -a "$LOG_FILE" || error "Failed to install base dependencies"
 
     log "Installing Node.js v${NODE_VERSION} LTS..."
@@ -94,9 +96,47 @@ install_dependencies() {
 configure_parameters() {
     echo -e "${YELLOW}--- Infisical Configuration ---${NC}"
     
-    # Flags or Environment Variables can skip this
-    [[ -z "${DB_URL:-}" ]] && read -p "Enter PostgreSQL DB_URL (e.g., postgresql://user:pass@host:5432/db): " DB_URL
-    [[ -z "${REDIS_URL:-}" ]] && read -p "Enter Redis REDIS_URL (e.g., redis://host:6379): " REDIS_URL
+    # --- PostgreSQL Configuration ---
+    if [[ -z "${DB_URL:-}" ]]; then
+        echo -e "\n${BLUE}[PostgreSQL Configuration]${NC}"
+        read -p "Database Host [localhost]: " DB_HOST
+        DB_HOST=${DB_HOST:-localhost}
+        read -p "Database Port [5432]: " DB_PORT
+        DB_PORT=${DB_PORT:-5432}
+        read -p "Database User: " DB_USER
+        read -s -p "Database Password: " DB_PASS
+        echo ""
+        read -p "Database Name [infisical]: " DB_NAME
+        DB_NAME=${DB_NAME:-infisical}
+        
+        # Construct DB_URL: postgresql://user:pass@host:port/db
+        # URL encoding password if it contains special characters would be ideal, 
+        # but for simple cases this works:
+        DB_URL="postgresql://${DB_USER}:${DB_PASS}@${DB_HOST}:${DB_PORT}/${DB_NAME}"
+    fi
+
+    # --- Redis Configuration ---
+    if [[ -z "${REDIS_URL:-}" ]]; then
+        echo -e "\n${BLUE}[Redis Configuration]${NC}"
+        read -p "Redis Host [localhost]: " REDIS_HOST
+        REDIS_HOST=${REDIS_HOST:-localhost}
+        read -p "Redis Port [6379]: " REDIS_PORT
+        REDIS_PORT=${REDIS_PORT:-6379}
+        read -p "Redis User (optional): " REDIS_USER
+        read -s -p "Redis Password (optional): " REDIS_PASS
+        echo ""
+        
+        if [[ -n "$REDIS_PASS" ]]; then
+            if [[ -n "$REDIS_USER" ]]; then
+                REDIS_URL="redis://${REDIS_USER}:${REDIS_PASS}@${REDIS_HOST}:${REDIS_PORT}"
+            else
+                REDIS_URL="redis::${REDIS_PASS}@${REDIS_HOST}:${REDIS_PORT}"
+            fi
+        else
+            REDIS_URL="redis://${REDIS_HOST}:${REDIS_PORT}"
+        fi
+    fi
+
     [[ -z "${SITE_URL:-}" ]] && read -p "Enter Infisical Site URL (e.g., https://infisical.example.com): " SITE_URL
 
     if [[ -z "$DB_URL" || -z "$REDIS_URL" || -z "$SITE_URL" ]]; then
@@ -110,36 +150,20 @@ configure_parameters() {
 }
 
 validate_connectivity() {
-    log "Performing pre-flight connectivity checks..."
+    log "Performing pre-flight connectivity and credential checks..."
 
-    # Helper to parse URL (postgres://user:pass@host:port/db or redis://host:port)
-    parse_url() {
-        local url=$1
-        # Extract host and port
-        local hp=$(echo "$url" | sed -E 's/.*@([^/]+).*/\1/' | sed -E 's/.*\/\/([^/]+).*/\1/')
-        local host=$(echo "$hp" | cut -d: -f1)
-        local port=$(echo "$hp" | cut -d: -f2 -s)
-        
-        # Default ports if not specified
-        if [[ -z "$port" ]]; then
-            [[ "$url" == postgres* ]] && port=5432
-            [[ "$url" == redis* ]] && port=6379
-        fi
-        echo "$host $port"
-    }
-
-    read -r DB_HOST DB_PORT <<< "$(parse_url "$DB_URL")"
-    read -r REDIS_HOST REDIS_PORT <<< "$(parse_url "$REDIS_URL")"
-
-    log "Checking PostgreSQL: ${DB_HOST}:${DB_PORT}..."
-    if ! timeout 5 bash -c "cat < /dev/tcp/${DB_HOST}/${DB_PORT}" &>/dev/null; then
-        error "Unable to connect to PostgreSQL at ${DB_HOST}:${DB_PORT}. Check network/firewall."
+    log "Verifying PostgreSQL connection..."
+    if ! PGPASSWORD="" psql "$DB_URL" -c "SELECT 1" &>/dev/null; then
+        error "Failed to connect to PostgreSQL. Check credentials, host, port, and if the database exists."
     fi
+    success "PostgreSQL connection verified."
 
-    log "Checking Redis: ${REDIS_HOST}:${REDIS_PORT}..."
-    if ! timeout 5 bash -c "cat < /dev/tcp/${REDIS_HOST}/${REDIS_PORT}" &>/dev/null; then
-        error "Unable to connect to Redis at ${REDIS_HOST}:${REDIS_PORT}. Check network/firewall."
+    log "Verifying Redis connection..."
+    # Using redis-cli -u to support connection URI
+    if ! redis-cli -u "$REDIS_URL" PING | grep -q "PONG"; then
+        error "Failed to connect to Redis. Check host, port, and password if provided."
     fi
+    success "Redis connection verified."
 
     success "Pre-flight checks passed!"
 }
