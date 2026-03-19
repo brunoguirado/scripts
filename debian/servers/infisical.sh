@@ -169,6 +169,8 @@ setup_conf_file() {
     
     cat <<EOF > "$CONF_FILE"
 # Infrastructure
+infisical_core['HOST'] = '0.0.0.0'
+infisical_core['PORT'] = 8080
 infisical_core['DB_CONNECTION_URI'] = '${DB_URL//\'/\\\'}'
 infisical_core['REDIS_URL'] = '${REDIS_URL//\'/\\\'}'
 infisical_core['SITE_URL'] = '${SITE_URL//\'/\\\'}'
