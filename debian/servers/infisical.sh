@@ -1,0 +1,280 @@
+#!/usr/bin/env bash
+
+# Infisical Self-Hosted Standalone Installation Script for LXC (Debian/Ubuntu)
+# Role: Senior DevSecOps Engineer
+# Architecture: External Postgres & Redis
+# Constraints: 512MB RAM Optimization
+
+set -euo pipefail
+
+# --- Configuration & Defaults ---
+export DEBIAN_FRONTEND=noninteractive
+LOG_FILE="/var/log/infisical-install.log"
+INFISICAL_USER="infisical"
+INFISICAL_DIR="/opt/infisical"
+NODE_VERSION="20" # Node.js LTS (v20)
+ENV_FILE="${INFISICAL_DIR}/.env"
+
+# Colors for output
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+NC='\033[0m' # No Color
+
+# --- Helper Functions ---
+
+log() {
+    echo -e "${BLUE}[$(date +'%Y-%m-%d %H:%M:%S')]${NC} $1" | tee -a "$LOG_FILE"
+}
+
+success() {
+    echo -e "${GREEN}[SUCCESS]${NC} $1" | tee -a "$LOG_FILE"
+}
+
+error() {
+    echo -e "${RED}[ERROR]${NC} $1" | tee -a "$LOG_FILE" >&2
+    exit 1
+}
+
+warn() {
+    echo -e "${YELLOW}[WARNING]${NC} $1" | tee -a "$LOG_FILE"
+}
+
+check_root() {
+    if [[ $EUID -ne 0 ]]; then
+        error "This script must be run as root (or with sudo)."
+    fi
+}
+
+# Detect Memory and set NODE_OPTIONS
+detect_memory() {
+    local total_mem_kb
+    total_mem_kb=$(grep MemTotal /proc/meminfo | awk '{print $2}')
+    local total_mem_mb=$((total_mem_kb / 1024))
+    
+    # Calculate ~85% of RAM for Node.js, minimum 128MB, maximum 4096 (unless server is huge)
+    local node_mem=$(( (total_mem_mb * 85) / 100 ))
+    if [ "$node_mem" -lt 128 ]; then node_mem=128; fi
+    
+    NODE_MAX_OLD_SPACE=$node_mem
+    log "Memory detected: ${total_mem_mb}MB. Setting Node.js max-old-space-size to ${NODE_MAX_OLD_SPACE}MB."
+}
+
+generate_secret() {
+    openssl rand -hex 32
+}
+
+# --- Installation Steps ---
+
+install_dependencies() {
+    log "Updating system and installing essential build dependencies..."
+    apt-get update && apt-get install -y \
+        curl \
+        git \
+        build-essential \
+        python3 \
+        pkg-config \
+        libssl-dev \
+        ca-certificates \
+        gnupg \
+        openssl \
+        jq \
+        netcat-openbsd \
+        | tee -a "$LOG_FILE" || error "Failed to install base dependencies"
+
+    log "Installing Node.js v${NODE_VERSION} LTS..."
+    curl -fsSL https://deb.nodesource.com/setup_${NODE_VERSION}.x | bash -
+    apt-get install -y nodejs | tee -a "$LOG_FILE" || error "Failed to install Node.js"
+    
+    log "Node.js version: $(node -v)"
+    log "NPM version: $(npm -v)"
+}
+
+configure_parameters() {
+    echo -e "${YELLOW}--- Infisical Configuration ---${NC}"
+    
+    # Flags or Environment Variables can skip this
+    [[ -z "${DB_URL:-}" ]] && read -p "Enter PostgreSQL DB_URL (e.g., postgresql://user:pass@host:5432/db): " DB_URL
+    [[ -z "${REDIS_URL:-}" ]] && read -p "Enter Redis REDIS_URL (e.g., redis://host:6379): " REDIS_URL
+    [[ -z "${SITE_URL:-}" ]] && read -p "Enter Infisical Site URL (e.g., https://infisical.example.com): " SITE_URL
+
+    if [[ -z "$DB_URL" || -z "$REDIS_URL" || -z "$SITE_URL" ]]; then
+        error "Missing required parameters (DB_URL, REDIS_URL, or SITE_URL)"
+    fi
+
+    # Auto-generate security keys if not provided
+    ENCRYPTION_KEY=${ENCRYPTION_KEY:-$(generate_secret)}
+    JWT_SECRET=${JWT_SECRET:-$(generate_secret)}
+    ROOT_ENCRYPTION_KEY=${ROOT_ENCRYPTION_KEY:-$(generate_secret)}
+}
+
+validate_connectivity() {
+    log "Performing pre-flight connectivity checks..."
+
+    # Helper to parse URL (postgres://user:pass@host:port/db or redis://host:port)
+    parse_url() {
+        local url=$1
+        # Extract host and port
+        local hp=$(echo "$url" | sed -E 's/.*@([^/]+).*/\1/' | sed -E 's/.*\/\/([^/]+).*/\1/')
+        local host=$(echo "$hp" | cut -d: -f1)
+        local port=$(echo "$hp" | cut -d: -f2 -s)
+        
+        # Default ports if not specified
+        if [[ -z "$port" ]]; then
+            [[ "$url" == postgres* ]] && port=5432
+            [[ "$url" == redis* ]] && port=6379
+        fi
+        echo "$host $port"
+    }
+
+    read -r DB_HOST DB_PORT <<< "$(parse_url "$DB_URL")"
+    read -r REDIS_HOST REDIS_PORT <<< "$(parse_url "$REDIS_URL")"
+
+    log "Checking PostgreSQL: ${DB_HOST}:${DB_PORT}..."
+    if ! timeout 5 bash -c "cat < /dev/tcp/${DB_HOST}/${DB_PORT}" &>/dev/null; then
+        error "Unable to connect to PostgreSQL at ${DB_HOST}:${DB_PORT}. Check network/firewall."
+    fi
+
+    log "Checking Redis: ${REDIS_HOST}:${REDIS_PORT}..."
+    if ! timeout 5 bash -c "cat < /dev/tcp/${REDIS_HOST}/${REDIS_PORT}" &>/dev/null; then
+        error "Unable to connect to Redis at ${REDIS_HOST}:${REDIS_PORT}. Check network/firewall."
+    fi
+
+    success "Pre-flight checks passed!"
+}
+
+prepare_environment() {
+    log "Creating infisical user and directory..."
+    if ! id "$INFISICAL_USER" &>/dev/null; then
+        useradd -m -s /bin/bash "$INFISICAL_USER"
+    fi
+
+    mkdir -p "$INFISICAL_DIR"
+    chown "$INFISICAL_USER":"$INFISICAL_USER" "$INFISICAL_DIR"
+}
+
+clone_and_install() {
+    log "Cloning Infisical repository..."
+    cd "$INFISICAL_DIR"
+    
+    # Cleanup if directory is not empty
+    if [ -d ".git" ]; then
+        warn "Directory $INFISICAL_DIR already contains a git repo. Pulling latest..."
+        sudo -u "$INFISICAL_USER" git pull
+    else
+        sudo -u "$INFISICAL_USER" git clone https://github.com/Infisical/infisical.git .
+    fi
+
+    log "Installing NPM dependencies (this may take a few minutes)..."
+    # Dynamic memory optimization for NPM build
+    export NODE_OPTIONS="--max-old-space-size=${NODE_MAX_OLD_SPACE}"
+    sudo -u "$INFISICAL_USER" npm install --production --include=dev | tee -a "$LOG_FILE" || error "NPM install failed"
+    
+    log "Building the project..."
+    sudo -u "$INFISICAL_USER" npm run build | tee -a "$LOG_FILE" || error "NPM build failed"
+}
+
+setup_env_file() {
+    log "Configuring .env file..."
+    cat <<EOF | sudo -u "$INFISICAL_USER" tee "$ENV_FILE" > /dev/null
+# Infrastructure
+NODE_ENV=production
+DB_URL=${DB_URL}
+REDIS_URL=${REDIS_URL}
+SITE_URL=${SITE_URL}
+
+# Security
+ENCRYPTION_KEY=${ENCRYPTION_KEY}
+JWT_SECRET=${JWT_SECRET}
+ROOT_ENCRYPTION_KEY=${ROOT_ENCRYPTION_KEY}
+
+# Optimization dynamic detection
+NODE_OPTIONS="--max-old-space-size=${NODE_MAX_OLD_SPACE}"
+
+# Optional: Adjust if using mail
+# SMTP_HOST=
+# SMTP_PORT=
+# SMTP_USERNAME=
+# SMTP_PASSWORD=
+EOF
+    chmod 600 "$ENV_FILE"
+}
+
+run_migrations() {
+    log "Running database migrations..."
+    cd "$INFISICAL_DIR"
+    sudo -u "$INFISICAL_USER" npm run migration:run | tee -a "$LOG_FILE" || error "Migrations failed"
+}
+
+setup_systemd() {
+    log "Setting up systemd service..."
+    cat <<EOF > /etc/systemd/system/infisical.service
+[Unit]
+Description=Infisical Standalone Service
+After=network.target
+
+[Service]
+Type=simple
+User=${INFISICAL_USER}
+WorkingDirectory=${INFISICAL_DIR}
+EnvironmentFile=${ENV_FILE}
+Environment=NODE_OPTIONS="--max-old-space-size=${NODE_MAX_OLD_SPACE}"
+ExecStart=/usr/bin/npm start
+Restart=always
+RestartSec=10
+StandardOutput=syslog
+StandardError=syslog
+SyslogIdentifier=infisical
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+    systemctl daemon-reload
+    systemctl enable infisical
+    systemctl restart infisical || error "Failed to start Infisical service"
+}
+
+final_output() {
+    IP_ADDRESS=$(hostname -I | awk '{print $1}')
+    echo -e "\n"
+    echo -e "${GREEN}####################################################${NC}"
+    echo -e "${GREEN}#          INFISICAL INSTALADO COM SUCESSO         #${NC}"
+    echo -e "${GREEN}####################################################${NC}"
+    echo -e "\n${YELLOW}--- IMPORTANTE: CONFIGURAÇÃO INICIAL ---${NC}"
+    echo -e "O usuário master (administrador) deve ser criado no"
+    echo -e "primeiro acesso via interface web."
+    echo -e "\n${BLUE}Detalhes do Acesso:${NC}"
+    echo -e "URL: ${SITE_URL}"
+    echo -e "Acesso Interno: http://${IP_ADDRESS}:8080"
+    echo -e "\n${YELLOW}Credenciais Geradas (Guarde-as com segurança!):${NC}"
+    echo -e "ENCRYPTION_KEY: ${ENCRYPTION_KEY}"
+    echo -e "JWT_SECRET: ${JWT_SECRET}"
+    echo -e "ROOT_ENCRYPTION_KEY: ${ROOT_ENCRYPTION_KEY}"
+    echo -e "\n${BLUE}Status do Serviço:${NC}"
+    systemctl status infisical --no-pager | grep "Active:"
+    echo -e "\n${BLUE}Logs podem ser acompanhados em:${NC} journalctl -u infisical -f"
+    echo -e "${GREEN}####################################################${NC}\n"
+}
+
+# --- Main Execution ---
+
+main() {
+    check_root
+    log "Starting Infisical Standalone installation for LXC..."
+    
+    detect_memory
+    install_dependencies
+    configure_parameters
+    validate_connectivity
+    prepare_environment
+    clone_and_install
+    setup_env_file
+    run_migrations
+    setup_systemd
+    final_output
+}
+
+main "$@"
+
