@@ -4,6 +4,11 @@
 # Role: Senior DevSecOps Engineer
 # Architecture: External Postgres & Redis
 # Constraints: 512MB RAM Optimization
+# Recent Improvements:
+# - Granular RDS/Redis config prompts with auto-URL construction.
+# - Pre-flight credential validation via native tools (psql/redis-cli).
+# - Portable user switching (works on minimal LXC without sudo).
+# - Config persistence (loads existing .env to skip redundant prompts).
 
 set -euo pipefail
 
@@ -44,6 +49,17 @@ warn() {
 check_root() {
     if [[ $EUID -ne 0 ]]; then
         error "This script must be run as root (or with sudo)."
+    fi
+}
+
+# --- Helper to run commands as the infisical user ---
+# This avoids hard dependency on 'sudo' by using 'su' as a fallback.
+run_as_user() {
+    local cmd="$1"
+    if command -v sudo >/dev/null 2>&1; then
+        sudo -u "$INFISICAL_USER" bash -c "$cmd"
+    else
+        su -s /bin/bash -c "$cmd" "$INFISICAL_USER"
     fi
 }
 
@@ -96,6 +112,18 @@ install_dependencies() {
 configure_parameters() {
     echo -e "${YELLOW}--- Infisical Configuration ---${NC}"
     
+    # Load existing config if available to allow re-runs
+    if [[ -f "$ENV_FILE" ]]; then
+        log "Existing environment file found at ${ENV_FILE}. Loading values..."
+        # Only set if not already set by env vars
+        [[ -z "${DB_URL:-}" ]] && DB_URL=$(grep "^DB_URL=" "$ENV_FILE" | cut -d'=' -f2- || echo "")
+        [[ -z "${REDIS_URL:-}" ]] && REDIS_URL=$(grep "^REDIS_URL=" "$ENV_FILE" | cut -d'=' -f2- || echo "")
+        [[ -z "${SITE_URL:-}" ]] && SITE_URL=$(grep "^SITE_URL=" "$ENV_FILE" | cut -d'=' -f2- || echo "")
+        [[ -z "${ENCRYPTION_KEY:-}" ]] && ENCRYPTION_KEY=$(grep "^ENCRYPTION_KEY=" "$ENV_FILE" | cut -d'=' -f2- || echo "")
+        [[ -z "${JWT_SECRET:-}" ]] && JWT_SECRET=$(grep "^JWT_SECRET=" "$ENV_FILE" | cut -d'=' -f2- || echo "")
+        [[ -z "${ROOT_ENCRYPTION_KEY:-}" ]] && ROOT_ENCRYPTION_KEY=$(grep "^ROOT_ENCRYPTION_KEY=" "$ENV_FILE" | cut -d'=' -f2- || echo "")
+    fi
+
     # --- PostgreSQL Configuration ---
     if [[ -z "${DB_URL:-}" ]]; then
         echo -e "\n${BLUE}[PostgreSQL Configuration]${NC}"
@@ -192,23 +220,23 @@ clone_and_install() {
     # Cleanup if directory is not empty
     if [ -d ".git" ]; then
         warn "Directory $INFISICAL_DIR already contains a git repo. Pulling latest..."
-        sudo -u "$INFISICAL_USER" git pull
+        run_as_user "git pull"
     else
-        sudo -u "$INFISICAL_USER" git clone https://github.com/Infisical/infisical.git .
+        run_as_user "git clone https://github.com/Infisical/infisical.git ."
     fi
 
     log "Installing NPM dependencies (this may take a few minutes)..."
     # Dynamic memory optimization for NPM build
     export NODE_OPTIONS="--max-old-space-size=${NODE_MAX_OLD_SPACE}"
-    sudo -u "$INFISICAL_USER" npm install --production --include=dev | tee -a "$LOG_FILE" || error "NPM install failed"
+    run_as_user "npm install --production --include=dev" 2>&1 | tee -a "$LOG_FILE" || error "NPM install failed"
     
     log "Building the project..."
-    sudo -u "$INFISICAL_USER" npm run build | tee -a "$LOG_FILE" || error "NPM build failed"
+    run_as_user "npm run build" 2>&1 | tee -a "$LOG_FILE" || error "NPM build failed"
 }
 
 setup_env_file() {
     log "Configuring .env file..."
-    cat <<EOF | sudo -u "$INFISICAL_USER" tee "$ENV_FILE" > /dev/null
+    cat <<EOF > "$ENV_FILE"
 # Infrastructure
 NODE_ENV=production
 DB_URL=${DB_URL}
@@ -229,13 +257,14 @@ NODE_OPTIONS="--max-old-space-size=${NODE_MAX_OLD_SPACE}"
 # SMTP_USERNAME=
 # SMTP_PASSWORD=
 EOF
+    chown "$INFISICAL_USER":"$INFISICAL_USER" "$ENV_FILE"
     chmod 600 "$ENV_FILE"
 }
 
 run_migrations() {
     log "Running database migrations..."
     cd "$INFISICAL_DIR"
-    sudo -u "$INFISICAL_USER" npm run migration:run | tee -a "$LOG_FILE" || error "Migrations failed"
+    run_as_user "npm run migration:run" 2>&1 | tee -a "$LOG_FILE" || error "Migrations failed"
 }
 
 setup_systemd() {
