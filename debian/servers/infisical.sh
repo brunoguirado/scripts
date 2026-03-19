@@ -56,11 +56,9 @@ check_root() {
 # This avoids hard dependency on 'sudo' by using 'su' as a fallback.
 run_as_user() {
     local cmd="$1"
-    if command -v sudo >/dev/null 2>&1; then
-        sudo -u "$INFISICAL_USER" bash -c "$cmd"
-    else
-        su -s /bin/bash -c "$cmd" "$INFISICAL_USER"
-    fi
+    # We are already root (checked in check_root), so we use 'su' to drop privileges
+    # to the infisical user. This avoids any dependency on 'sudo'.
+    su -s /bin/bash -c "$cmd" "$INFISICAL_USER"
 }
 
 # Detect Memory and set NODE_OPTIONS
