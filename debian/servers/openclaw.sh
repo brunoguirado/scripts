@@ -104,8 +104,6 @@ Group=$OPENCLAW_USER
 
 # Environment paths overriding settings for security
 Environment="OPENCLAW_HOME=$OPENCLAW_HOME"
-Environment="OPENCLAW_STATE_DIR=$OPENCLAW_STATE"
-Environment="OPENCLAW_CONFIG_PATH=$OPENCLAW_CONFIG"
 Environment="PATH=$OPENCLAW_HOME/.npm-global/bin:/usr/bin:/bin"
 
 # ExecStart using the installed binary in background daemon mode
