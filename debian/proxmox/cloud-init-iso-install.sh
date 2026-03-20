@@ -9,9 +9,9 @@ if [ "$EUID" -ne 0 ]; then
   exit 1
 fi
 
-echo "1. Atualizando pacotes e instalando o cloud-init..."
+echo "1. Atualizando pacotes e instalando dependências essenciais..."
 apt-get update
-apt-get install -y cloud-init
+apt-get install -y cloud-init qemu-guest-agent cloud-guest-utils
 
 echo "2. Configurando a Fonte de Dados (Datasource) para Proxmox..."
 # Garantir que o diretório existe
@@ -29,7 +29,17 @@ systemctl enable cloud-config.service
 systemctl enable cloud-final.service
 
 echo "4. Limpando o estado do cloud-init para o 'Primeiro Boot'..."
-cloud-init clean --logs
+cloud-init clean --logs --seed
+
+echo "4.5 [Extra] Preparando a Rede (Limpando interfaces antigas)..."
+# O Debian configura a rede no /etc/network/interfaces durante a instalação.
+# Isso impede o cloud-init de aplicar o IP na VM clonada. Vamos deixar apenas o loopback.
+cat <<EOF > /etc/network/interfaces
+# The loopback network interface
+auto lo
+iface lo inet loopback
+EOF
+rm -f /etc/udev/rules.d/70-persistent-net.rules
 
 echo "5. [Extra] Limpando o machine-id (Essencial para templates no Proxmox)..."
 # É importante limpar o machine-id. Se você clonar a VM, sem limpar isso,
