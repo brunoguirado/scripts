@@ -18,7 +18,7 @@ echo "=> Proceeding with secure OpenClaw installation as root."
 
 echo "=> Updating system and installing required packages..."
 apt-get update
-apt-get install -y curl gnupg ca-certificates apt-transport-https sudo
+apt-get install -y curl gnupg ca-certificates apt-transport-https sudo git
 
 # --- 3. Install Node.js (v24 or v22.16+ recommended) ---
 
