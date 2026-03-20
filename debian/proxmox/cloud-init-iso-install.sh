@@ -11,7 +11,8 @@ fi
 
 echo "1. Atualizando pacotes e instalando dependências essenciais..."
 apt-get update
-apt-get install -y cloud-init qemu-guest-agent cloud-guest-utils
+# Adicionado openssh-server para garantir o acesso SSH pós-cloud-init
+apt-get install -y cloud-init qemu-guest-agent cloud-guest-utils openssh-server
 
 echo "2. Configurando a Fonte de Dados (Datasource) para Proxmox..."
 # Garantir que o diretório existe
