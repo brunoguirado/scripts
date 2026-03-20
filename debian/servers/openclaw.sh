@@ -62,6 +62,10 @@ fi
 echo "=> Creating secured directory structure under $OPENCLAW_HOME..."
 mkdir -p "$OPENCLAW_STATE"
 
+# Optimization: Compile cache directory for faster node startup
+mkdir -p /var/tmp/openclaw-compile-cache
+chown -R "$OPENCLAW_USER":"$OPENCLAW_USER" /var/tmp/openclaw-compile-cache
+
 # Set restrictive permissions
 chown -R "$OPENCLAW_USER":"$OPENCLAW_USER" "$OPENCLAW_HOME"
 chmod 700 "$OPENCLAW_HOME"
@@ -105,6 +109,10 @@ Group=$OPENCLAW_USER
 # Environment paths overriding settings for security
 Environment="OPENCLAW_HOME=$OPENCLAW_HOME"
 Environment="PATH=$OPENCLAW_HOME/.npm-global/bin:/usr/bin:/bin"
+
+# Startup optimizations recommended by openclaw doctor
+Environment="NODE_COMPILE_CACHE=/var/tmp/openclaw-compile-cache"
+Environment="OPENCLAW_NO_RESPAWN=1"
 
 # ExecStart using the installed binary in foreground mode (with LAN binding)
 ExecStart=$OPENCLAW_BIN gateway run --bind lan
