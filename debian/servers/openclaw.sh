@@ -98,7 +98,7 @@ After=network-online.target
 Wants=network-online.target
 
 [Service]
-Type=forking
+Type=simple
 User=$OPENCLAW_USER
 Group=$OPENCLAW_USER
 
@@ -106,8 +106,8 @@ Group=$OPENCLAW_USER
 Environment="OPENCLAW_HOME=$OPENCLAW_HOME"
 Environment="PATH=$OPENCLAW_HOME/.npm-global/bin:/usr/bin:/bin"
 
-# ExecStart using the installed binary in background daemon mode
-ExecStart=$OPENCLAW_BIN gateway start
+# ExecStart using the installed binary in foreground mode (with LAN binding)
+ExecStart=$OPENCLAW_BIN gateway run --bind lan
 
 Restart=on-failure
 RestartSec=5
