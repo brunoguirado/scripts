@@ -46,7 +46,6 @@ echo "=> Installed Node.js version: $node_version"
 OPENCLAW_USER="openclaw"
 OPENCLAW_HOME="/opt/openclaw"
 OPENCLAW_STATE="$OPENCLAW_HOME/state"
-OPENCLAW_CONFIG="$OPENCLAW_HOME/config"
 
 echo "=> Creating dedicated system user '$OPENCLAW_USER'..."
 if ! id -u "$OPENCLAW_USER" >/dev/null 2>&1; then
@@ -62,13 +61,11 @@ fi
 
 echo "=> Creating secured directory structure under $OPENCLAW_HOME..."
 mkdir -p "$OPENCLAW_STATE"
-mkdir -p "$OPENCLAW_CONFIG"
 
 # Set restrictive permissions
 chown -R "$OPENCLAW_USER":"$OPENCLAW_USER" "$OPENCLAW_HOME"
 chmod 700 "$OPENCLAW_HOME"
 chmod 700 "$OPENCLAW_STATE"
-chmod 700 "$OPENCLAW_CONFIG"
 
 # --- 5. Install OpenClaw ---
 
