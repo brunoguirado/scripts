@@ -5,7 +5,7 @@ OLD_USER=$1
 NEW_USER=$2
 
 # Ensure script is run as root
-if [ "$EUID" -ne 0 ]; then 
+if [ "$(id -u)" -ne 0 ]; then 
   echo "Please run as root"
   exit 1
 fi
@@ -19,12 +19,12 @@ fi
 echo "--- Renaming User from $OLD_USER to $NEW_USER ---"
 
 # 1. Existence Checks
-if ! id "$OLD_USER" &>/dev/null; then
+if ! id "$OLD_USER" > /dev/null 2>&1; then
   echo "Error: User $OLD_USER does not exist."
   exit 1
 fi
 
-if id "$NEW_USER" &>/dev/null; then
+if id "$NEW_USER" > /dev/null 2>&1; then
   echo "Error: User $NEW_USER already exists."
   exit 1
 fi
