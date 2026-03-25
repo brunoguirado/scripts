@@ -1,7 +1,7 @@
 # Antigravity Bootstrap v3.1 — Documentação Ultra-Detalhada
 
-> **Arquivo:** `antigravity-bootstrap.sh` (ou qualquer nome que você der ao arquivo)  
-> **Versão:** 3.1 SOTA (Dynamic Filename Aware)  
+> **Localização Recomendada:** `.antigravity/bootstrap.sh`  
+> **Versão:** 3.1 SOTA (Location-Aware / Dynamic Path)  
 > **Target:** Servidores remotos Linux (LXC/Proxmox, VPS) — headless, SSH-safe  
 > **Arquitetura:** One-User-Per-Project (Isolamento de $HOME)
 
@@ -22,9 +22,9 @@
 
 Esta versão foi otimizada para o modelo **um usuário Linux por projeto**, garantindo isolamento total e performance máxima:
 
-- **Nome Dinâmico:** O script detecta automaticamente seu próprio nome (`$0`). Se você renomear para `init.sh`, os git hooks continuarão funcionando sem quebra.
-- **Merge não-destrutivo:** Ao configurar o MCP, o script não sobrescreve seu arquivo global. ele lê o `~/.gemini/antigravity/mcp_config.json` existente e apenas injeta ou atualiza as chaves do projeto atual.
-- **Symlink Inteligente:** O arquivo de regras (`coding-standards.md`) vive dentro do seu projeto (para ser versionado no Git), mas é "linkado" para a pasta global da IDE. Você edita no projeto e a IDE aprende instantaneamente.
+- **Consciência de Path:** O script detecta automaticamente onde está instalado em relação à raiz do Git. Se você colocar em `.antigravity/`, os git hooks saberão exatamente onde buscá-lo para reconstruir o contexto.
+- **Merge não-destrutivo:** Ao configurar o MCP, o script não sobrescreve seu arquivo global. Ele lê o `~/.gemini/antigravity/mcp_config.json` existente e apenas injeta ou atualiza as chaves do projeto atual.
+- **Symlink Inteligente:** O arquivo de regras (`coding-standards.md`) vive dentro do seu projeto em `.antigravity/knowledge/` (para ser versionado no Git), mas é "linkado" para a pasta global da IDE. Você edita no projeto e a IDE aprende instantaneamente.
 
 ---
 
@@ -68,9 +68,16 @@ O agente usará esta tabela (definida no seu `coding-standards.md`) para decidir
 
 ---
 
-## 6. Configurações da IDE (settings.json)
+---
 
-O script configura o comportamento do agente para ser "silencioso e eficiente":
-- **`autoApprove`:** Ativado para leituras (MCP/Arquivos/Browser). O agente não te interrompe para ler o código, apenas para alterá-lo.
-- **`tokenEconomy`:** Ativa `lazyContext` e `batchMcpCalls` para economizar tokens e acelerar a resposta.
-- **`remoteServer`:** Força o modo `headless` e `sshSafe`, garantindo que o agente não tente abrir janelas ou usar ferramentas visuais no seu LXC/VPS.
+## 7. Como Iniciar (Quick Start)
+
+Para uma instalação limpa e organizada, execute:
+
+```bash
+mkdir -p .antigravity
+curl -sSL https://raw.githubusercontent.com/brunoguirado/scripts/main/google/antigravity/bootstrap.sh > .antigravity/bootstrap.sh
+bash .antigravity/bootstrap.sh
+```
+
+Isso manterá a raiz do seu projeto limpa enquanto fornece todo o poder do Antigravity.

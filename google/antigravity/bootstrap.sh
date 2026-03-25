@@ -32,7 +32,14 @@ AG_PROJECT="$PWD/.antigravity"
 AG_KNOWLEDGE_PROJECT="$AG_PROJECT/knowledge"
 
 mkdir -p "$AG_KNOWLEDGE_GLOBAL" "$AG_KNOWLEDGE_PROJECT" "$AG_PROJECT/workflows"
-SCRIPT_NAME=$(basename "$0")
+
+# Detect script path relative to git root for hooks
+# Works whether run from root or subdirectory
+SCRIPT_PATH_FROM_ROOT=$(git ls-files --full-name "$0" 2>/dev/null || echo "$0")
+SCRIPT_PATH_FROM_ROOT="${SCRIPT_PATH_FROM_ROOT#./}" # Remove leading ./
+if [[ "$SCRIPT_PATH_FROM_ROOT" != */* ]] && [ -n "$(git rev-parse --show-prefix)" ]; then
+    SCRIPT_PATH_FROM_ROOT="$(git rev-parse --show-prefix)$SCRIPT_PATH_FROM_ROOT"
+fi
 
 # .gitignore — ephemeral files stay out of git
 cat << 'EOF' > "$AG_PROJECT/.gitignore"
@@ -194,7 +201,7 @@ if [ "\$HOOK_TYPE" = "post-merge" ] || [ "\$HOOK_TYPE" = "post-checkout" ]; then
     CHANGED=\$(git diff --name-only HEAD@{1} HEAD 2>/dev/null || echo "")
     if echo "\$CHANGED" | grep -qE "^(package\.json|requirements\.txt|pyproject\.toml)$"; then
         echo "🔄 [Antigravity] Deps changed — rebuilding stack context..."
-        bash "\$(git rev-parse --show-toplevel)/$SCRIPT_NAME"
+        bash "\$(git rev-parse --show-toplevel)/$SCRIPT_PATH_FROM_ROOT"
     fi
 fi
 
@@ -246,5 +253,6 @@ echo ""
 echo "📁 Project (git-tracked):"
 echo "   $AG_KNOWLEDGE_PROJECT/coding-standards.md  ← source of truth"
 echo ""
-echo "💡 Override model: AG_DEFAULT_MODEL=gemini-3.1-pro-high bash $SCRIPT_NAME"
+echo "💡 To re-run bootstrap:"
+echo "   bash $SCRIPT_PATH_FROM_ROOT"
 echo "====================================================================="
