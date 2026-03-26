@@ -5,20 +5,12 @@
 # Architecture: One-User-Per-Project | Global Config Native | JIT Context
 # Target: Remote Servers (LXC/Proxmox, VPS) — headless, SSH-safe
 # Security Model: 1 Linux User = 1 Project = 1 isolated ~/.gemini/antigravity
-#
-# File Layout:
-#   ~/.gemini/antigravity/mcp_config.json          ← MCP (IDE reads this)
-#   ~/.gemini/antigravity/knowledge/               ← Knowledge (IDE reads this)
-#     ├── stack-context.md                         ← auto-generated, ephemeral
-#     └── coding-standards.md                      ← symlink → project (.git tracked)
-#   $PWD/.antigravity/knowledge/coding-standards.md ← source of truth (versioned)
-#   $PWD/.git/hooks/                               ← evolutionary hooks
 # ==============================================================================
 
 set -e
 
 # ── Dependency Check ──────────────────────────────────────────────────────────
-for cmd in jq curl; do
+for cmd in jq curl git; do
     command -v "$cmd" >/dev/null 2>&1 || { echo "❌ '$cmd' not found. Install: apt install $cmd"; exit 1; }
 done
 
@@ -27,9 +19,30 @@ echo "🚀 [Antigravity v3.1] One-User-Per-Project Bootstrap..."
 # ── Project Root Detection (Safe for subdirectories) ─────────────────────────
 PROJECT_ROOT=$(git rev-parse --show-toplevel 2>/dev/null || echo "$PWD")
 cd "$PROJECT_ROOT"
-
-# Ensure PROJECT_ROOT is absolute and doesn't contain ~
 PROJECT_ROOT=$(realpath "$PROJECT_ROOT")
+
+# ── Infisical Guard ───────────────────────────────────────────────────────────
+if command -v infisical >/dev/null 2>&1; then
+    # If .infisical.json exists but no Infisical vars are in env, warn the user
+    if [ -f "$PROJECT_ROOT/.infisical.json" ] && [ -z "$INFISICAL_WORKSPACE_ID" ] && [ -z "$INFISICAL_TOKEN" ]; then
+        echo "⚠️  WARNING: Infisical detected but NOT active."
+        echo "   This project depends on Infisical for Sentry, DigitalOcean, and OpenAI keys."
+        echo "   Running without it will result in an incomplete/broken MCP configuration."
+        echo ""
+        # Only prompt if stdin is a terminal
+        if [ -t 0 ]; then
+            printf "👉 Do you want to continue with potentially missing secrets? (y/N) "
+            read -r REPLY
+            echo ""
+            if [ "$REPLY" != "y" ] && [ "$REPLY" != "Y" ]; then
+                echo "   💡 Hint: Use 'infisical run --env=dev -- bash .antigravity/bootstrap.sh'"
+                exit 1
+            fi
+        else
+            echo "   (Non-interactive shell: continuing anyway, but expect missing configs)"
+        fi
+    fi
+fi
 
 AG_GLOBAL="$HOME/.gemini/antigravity"
 AG_KNOWLEDGE_GLOBAL="$AG_GLOBAL/knowledge"
@@ -41,6 +54,10 @@ mkdir -p "$AG_KNOWLEDGE_GLOBAL" "$AG_KNOWLEDGE_PROJECT" "$AG_PROJECT/workflows"
 
 # Detect script path relative to git root for hooks
 SCRIPT_PATH_FROM_ROOT=$(git ls-files --full-name "$0" 2>/dev/null || echo "$0")
+# Fix: SCRIPT_PATH_FROM_ROOT might have a leading ./ or be absolute
+if [ "${SCRIPT_PATH_FROM_ROOT%${SCRIPT_PATH_FROM_ROOT#?}}" = "/" ]; then
+    SCRIPT_PATH_FROM_ROOT=$(realpath --relative-to="$PROJECT_ROOT" "$SCRIPT_PATH_FROM_ROOT")
+fi
 SCRIPT_PATH_FROM_ROOT="${SCRIPT_PATH_FROM_ROOT#./}"
 
 # .gitignore — ephemeral files stay out of git
@@ -109,7 +126,6 @@ echo "📄 stack-context.md → $AG_KNOWLEDGE_GLOBAL"
 
 # ==============================================================================
 # STEP 3: coding-standards.md → Project (versioned) + Symlink to Global
-# Created once in project. Never overwritten. Symlinked so IDE reads it.
 # ==============================================================================
 if [ ! -f "$AG_KNOWLEDGE_PROJECT/coding-standards.md" ]; then
 cat << 'EOF' > "$AG_KNOWLEDGE_PROJECT/coding-standards.md"
@@ -121,67 +137,31 @@ cat << 'EOF' > "$AG_KNOWLEDGE_PROJECT/coding-standards.md"
 - NO REPETITION: Never repeat context already in conversation. Reference it by name.
 - SILENT FETCH: Browser doc fetches are silent — no narration.
 
-## Cognitive Override
-- LANGUAGE FORCING: Translate non-English prompts to English internally. All reasoning runs in English.
-- INTENT MAPPING: Understand the real goal, not just the literal words.
-
 ## Code Quality (Zero Error Policy)
 - TOOL FIRST: Check file existence via MCP before creating. Check deps before installing.
 - READ BEFORE WRITE: Always read target file before editing any section.
-- NO HALLUCINATIONS: Never invent signatures, package names, or paths. Verify via MCP or browser.
-- ALGORITHMIC DISCIPLINE: O(N) or O(log N) max. O(N²) requires explicit justification.
 - ATOMICITY: One logical change per step. No mixing refactors with features.
 
 ## Environment Awareness
 - REMOTE SERVER MODE: Headless Linux. No GUI. No desktop. SSH-safe outputs only.
-- SUDO-AWARE: Check if root is needed. Prefer user-space solutions.
 - ENV VARS FIRST: Config goes in env vars or .env files. Never hardcoded.
 - VENV MASTERY: If .venv exists, libraries are there. Use `pip show` to find source paths.
-
-## 🧠 Cognitive & Memory Recovery (UNSTICKING)
-- LOOP PREVENTION: If a tool fails twice with the same outcome, STOP. Report the impasse.
-- TIER JUMP: If gemini-3-flash fails a research task 2x, switch to gemini-3.1-pro-low.
-- SOURCE DISCOVERY: If lost in library internals (like Agno), explore `site-packages` via MCP.
-- CONTEXT COMPACTING: If history is long, summarize findings and proceed with the summary.
-
-## Model Routing (Tiered Intelligence)
-| Task Type                                      | Model                        |
-|------------------------------------------------|------------------------------|
-| Routine code, simple edits, terminal commands   | gemini-3-flash               |
-| Deep Research, complex logic fixed, unsticking | gemini-3.1-pro-low           |
-| Architecture, security review, complex design  | gemini-3.1-pro-high          |
-| Knowledge synthesis, code auditing, refactors  | claude-sonnet-4.6-thinking   |
-| Critical decisions, security review, deep bugs | claude-opus-4.6-thinking     |
 EOF
-    echo "📝 coding-standards.md created (user-owned, git-tracked)"
-else
-    echo "⏭️  coding-standards.md exists — skipping (user-owned)."
+    echo "📝 coding-standards.md created"
 fi
 
-# Symlink: project → global (IDE reads global, file lives versioned in project)
 ln -sf "$AG_KNOWLEDGE_PROJECT/coding-standards.md" "$AG_KNOWLEDGE_GLOBAL/coding-standards.md"
-echo "🔗 Symlink: coding-standards.md → $AG_KNOWLEDGE_GLOBAL"
 
 # ==============================================================================
 # STEP 4: MCP Config → Merge into ~/.gemini/antigravity/mcp_config.json
-# Uses $PWD as filesystem root — safe with 1-user-per-project model.
-# Merges non-destructively: preserves existing entries (e.g. supabase-mcp).
 # ==============================================================================
 echo "⚙️  Configuring MCP servers..."
 
-# Detect Python Executable (Prefer local .venv, MUST be absolute path)
 PYTHON_EXE=$(which python3)
-if [ -f "$PROJECT_ROOT/.venv/bin/python3" ]; then
-    PYTHON_EXE="$PROJECT_ROOT/.venv/bin/python3"
-    echo "   + Local .venv detected: using $PYTHON_EXE"
-elif [ -f "$PROJECT_ROOT/venv/bin/python3" ]; then
-    PYTHON_EXE="$PROJECT_ROOT/venv/bin/python3"
-    echo "   + Local venv detected: using $PYTHON_EXE"
-fi
+[ -f "$PROJECT_ROOT/.venv/bin/python3" ] && PYTHON_EXE="$PROJECT_ROOT/.venv/bin/python3"
+[ -f "$PROJECT_ROOT/venv/bin/python3" ] && PYTHON_EXE="$PROJECT_ROOT/venv/bin/python3"
 
-# Ensure Python-based MCP servers are installed
-echo "   (Verifying Python MCP servers: git, fetch...)"
-"$PYTHON_EXE" -m pip install -q mcp-server-git mcp-server-fetch 2>/dev/null || echo "   ⚠️  Could not install Python MCP servers automatically."
+"$PYTHON_EXE" -m pip install -q mcp-server-git mcp-server-fetch 2>/dev/null || true
 
 MCP_DATA=$(jq -n --arg pwd "$PROJECT_ROOT" --arg py "$PYTHON_EXE" '{
     "local-filesystem": { "command": "npx", "args": ["-y", "@modelcontextprotocol/server-filesystem", $pwd] },
@@ -191,54 +171,51 @@ MCP_DATA=$(jq -n --arg pwd "$PROJECT_ROOT" --arg py "$PYTHON_EXE" '{
     "fetch": { "command": $py, "args": ["-m", "mcp_server_fetch"] }
 }')
 
-# Dynamic Stack Detection & MCP Injection
 if [ -f "$PROJECT_ROOT/package.json" ]; then
-    if grep -q '"next"' "$PROJECT_ROOT/package.json"; then
-        echo "   + Next.js detected (adding Playwright & Vercel MCP)"
-        MCP_DATA=$(echo "$MCP_DATA" | jq '. + {
-            "playwright": { "command": "npx", "args": ["-y", "@modelcontextprotocol/server-playwright"] },
-            "vercel": { "command": "npx", "args": ["-y", "vercel-mcp"] }
-        }')
-    fi
     if grep -q '"prisma"' "$PROJECT_ROOT/package.json"; then
-        echo "   + Prisma detected (adding Prisma MCP)"
-        MCP_DATA=$(echo "$MCP_DATA" | jq '. + {
-            "prisma": { "command": "npx", "args": ["-y", "@prisma/mcp-server"] }
-        }')
-    fi
-    if [ -f "$PROJECT_ROOT/tailwind.config.js" ] || [ -f "$PROJECT_ROOT/tailwind.config.ts" ]; then
-        echo "   + Tailwind CSS detected"
+        MCP_DATA=$(echo "$MCP_DATA" | jq '. + {"prisma": {"command": "npx", "args": ["-y", "@prisma/mcp-server"]}}')
     fi
 fi
 
-if [ -f "$PROJECT_ROOT/pyproject.toml" ] || [ -f "$PROJECT_ROOT/requirements.txt" ]; then
-    if grep -qE "agno|phidata" "$PROJECT_ROOT/pyproject.toml" "$PROJECT_ROOT/requirements.txt" 2>/dev/null; then
-        echo "   + Agno/Phidata detected"
+# Sentry MCP
+SENTRY_DETECTED=$(grep -lE '"sentry"|sentry-sdk' "$PROJECT_ROOT/package.json" "$PROJECT_ROOT/pyproject.toml" "$PROJECT_ROOT/requirements.txt" 2>/dev/null || true)
+if [ -n "$SENTRY_DETECTED" ]; then
+    VAL_TOKEN="${SENTRY_ACCESS_TOKEN:-$SENTRY_AUTH_TOKEN}"
+    AI_KEY="${DIGITALOCEAN_MODEL_ACCESS_KEY:-$OPENAI_API_KEY}"
+    AI_URL="${DIGITALOCEAN_MODEL_BASE_URL:-}"
+    AI_MODEL="${DIGITALOCEAN_MODEL:-gpt-4o}"
+
+    if [ -n "$VAL_TOKEN" ]; then
+        echo "   + Sentry Token detected (Local Sentry MCP)"
+        S_ARGS=$(jq -n --arg url "$AI_URL" '["-y", "@sentry/mcp-server@latest"] + (if $url != "" then ["--openai-base-url", $url] else [] end)')
+        MCP_DATA=$(echo "$MCP_DATA" | jq \
+            --arg token "$VAL_TOKEN" \
+            --arg ai_key "$AI_KEY" \
+            --arg ai_model "$AI_MODEL" \
+            --argjson s_args "$S_ARGS" \
+            '. + {"sentry": {"command": "npx", "args": $s_args, "env": {"SENTRY_ACCESS_TOKEN": $token, "EMBEDDED_AGENT_PROVIDER": "openai", "OPENAI_API_KEY": $ai_key, "OPENAI_MODEL": $ai_model}}}')
+    else
+        echo "   + Sentry detected (Hosted Sentry MCP)"
+        MCP_DATA=$(echo "$MCP_DATA" | jq '. + {"sentry": {"url": "https://mcp.sentry.dev/mcp"}}')
     fi
 fi
 
 if [ -f "$MCP_CONFIG" ]; then
-    # Merge non-destructively
     UPDATED=$(jq --argjson new "$MCP_DATA" '.mcpServers += $new' "$MCP_CONFIG")
     echo "$UPDATED" > "$MCP_CONFIG"
-    echo "✅ MCP merged into $MCP_CONFIG"
 else
     jq -n --argjson new "$MCP_DATA" '{"mcpServers": $new}' > "$MCP_CONFIG"
-    echo "✅ MCP config created at $MCP_CONFIG"
 fi
+echo "✅ MCP configured."
 
 # ==============================================================================
 # STEP 5: Evolutionary Git Hooks
-# post-commit: marks evolution cycle
-# post-merge / post-checkout: rebuilds stack-context if deps changed
 # ==============================================================================
 if [ -d "$PWD/.git/hooks" ]; then
-    echo "🔗 Wiring Git hooks..."    # Central dispatcher
+    echo "🔗 Wiring Git hooks..."
     cat << HOOK > "$PWD/.git/hooks/antigravity-sync"
 #!/bin/bash
 HOOK_TYPE=\$1
-
-# Rebuild stack context when dependency manifests change
 if [ "\$HOOK_TYPE" = "post-merge" ] || [ "\$HOOK_TYPE" = "post-checkout" ]; then
     CHANGED=\$(git diff --name-only HEAD@{1} HEAD 2>/dev/null || echo "")
     if echo "\$CHANGED" | grep -qE "^(package\.json|requirements\.txt|pyproject\.toml)$"; then
@@ -246,13 +223,10 @@ if [ "\$HOOK_TYPE" = "post-merge" ] || [ "\$HOOK_TYPE" = "post-checkout" ]; then
         bash "\$(git rev-parse --show-toplevel)/$SCRIPT_PATH_FROM_ROOT"
     fi
 fi
-
-# Mark evolution cycle after each commit
 if [ "\$HOOK_TYPE" = "post-commit" ]; then
     KNOWLEDGE_DIR="\$HOME/.gemini/antigravity/knowledge"
     mkdir -p "\$KNOWLEDGE_DIR"
     echo "LAST_COMMIT: \$(git rev-parse HEAD)" > "\$KNOWLEDGE_DIR/evolution_trigger.tmp"
-    echo "🧠 [Antigravity] Evolution cycle marked."
 fi
 HOOK
     chmod +x "$PWD/.git/hooks/antigravity-sync"
@@ -261,45 +235,18 @@ HOOK
         local HOOK_FILE="$PWD/.git/hooks/$1"
         local CMD="./.git/hooks/antigravity-sync $1"
         if [ -f "$HOOK_FILE" ]; then
-            grep -q "antigravity-sync" "$HOOK_FILE" || printf "\n%s\n" "$CMD" >> "$HOOK_FILE"
+            grep -q "antigravity-sync" "$HOOK_FILE" || printf "\\n%s\\n" "$CMD" >> "$HOOK_FILE"
         else
-            printf "#!/bin/bash\n%s\n" "$CMD" > "$HOOK_FILE"
+            printf "#!/bin/bash\\n%s\\n" "$CMD" > "$HOOK_FILE"
             chmod +x "$HOOK_FILE"
         fi
     }
     inject_hook "post-merge"
     inject_hook "post-checkout"
     inject_hook "post-commit"
-    echo "✅ Git hooks wired."
-else
-    echo "⚠️  .git/hooks not found — run inside a git repo."
 fi
 
-# ==============================================================================
-# DONE
-# ==============================================================================
-DEFAULT_MODEL="${AG_DEFAULT_MODEL:-gemini-3-flash}"
-echo ""
 echo "====================================================================="
-echo "✅ Antigravity v3.1 — One-User-Per-Project Bootstrap Complete"
-echo "   Project        : $PWD"
-echo "   User           : $(whoami)"
-echo "   Stack          : $STACK_TYPE"
-echo "   Default model  : $DEFAULT_MODEL"
-echo ""
-echo "📁 Global (IDE reads):"
-echo "   $MCP_CONFIG"
-echo "   $AG_KNOWLEDGE_GLOBAL/stack-context.md"
-echo "   $AG_KNOWLEDGE_GLOBAL/coding-standards.md  ← symlink → project"
-echo ""
-echo "📁 Project (git-tracked):"
-echo "   $AG_PROJECT"
-echo "   $AG_KNOWLEDGE_PROJECT/coding-standards.md  ← source of truth"
-echo ""
-echo "💡 Client Config Tip (Cursor/VSCode):"
-echo "   To avoid frequent 'Accept' prompts, go to settings and enable 'Auto-approve'"
-echo "   for the MCP servers listed in $MCP_CONFIG."
-echo ""
-echo "💡 To re-run bootstrap:"
-echo "   bash $SCRIPT_PATH_FROM_ROOT"
+echo "✅ Antigravity v3.1 — Bootstrap Complete"
+echo "   Project: $PWD"
 echo "====================================================================="
