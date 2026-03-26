@@ -290,9 +290,12 @@ HOOK
         local HOOK_FILE="$PWD/.git/hooks/$1"
         local CMD="./.git/hooks/antigravity-sync $1"
         if [ -f "$HOOK_FILE" ]; then
-            grep -q "antigravity-sync" "$HOOK_FILE" || printf "\\n%s\\n" "$CMD" >> "$HOOK_FILE"
+            grep -q "antigravity-sync" "$HOOK_FILE" || printf "\n%s\n" "$CMD" >> "$HOOK_FILE"
         else
-            printf "#!/bin/bash\\n%s\\n" "$CMD" > "$HOOK_FILE"
+            cat << EOF > "$HOOK_FILE"
+#!/bin/bash
+$CMD
+EOF
             chmod +x "$HOOK_FILE"
         fi
     }
