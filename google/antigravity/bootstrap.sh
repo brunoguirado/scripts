@@ -28,6 +28,9 @@ echo "🚀 [Antigravity v3.1] One-User-Per-Project Bootstrap..."
 PROJECT_ROOT=$(git rev-parse --show-toplevel 2>/dev/null || echo "$PWD")
 cd "$PROJECT_ROOT"
 
+# Ensure PROJECT_ROOT is absolute and doesn't contain ~
+PROJECT_ROOT=$(realpath "$PROJECT_ROOT")
+
 AG_GLOBAL="$HOME/.gemini/antigravity"
 AG_KNOWLEDGE_GLOBAL="$AG_GLOBAL/knowledge"
 MCP_CONFIG="$AG_GLOBAL/mcp_config.json"
@@ -166,15 +169,42 @@ echo "🔗 Symlink: coding-standards.md → $AG_KNOWLEDGE_GLOBAL"
 # ==============================================================================
 echo "⚙️  Configuring MCP servers..."
 
-MCP_DATA=$(jq -n --arg pwd "$PROJECT_ROOT" '{
+# Detect Python Executable (Prefer local .venv, MUST be absolute path)
+PYTHON_EXE=$(which python3)
+if [ -f "$PROJECT_ROOT/.venv/bin/python3" ]; then
+    PYTHON_EXE="$PROJECT_ROOT/.venv/bin/python3"
+    echo "   + Local .venv detected: using $PYTHON_EXE"
+elif [ -f "$PROJECT_ROOT/venv/bin/python3" ]; then
+    PYTHON_EXE="$PROJECT_ROOT/venv/bin/python3"
+    echo "   + Local venv detected: using $PYTHON_EXE"
+fi
+
+# Ensure Python-based MCP servers are installed
+echo "   (Verifying Python MCP servers: git, fetch...)"
+"$PYTHON_EXE" -m pip install -q mcp-server-git mcp-server-fetch 2>/dev/null || echo "   ⚠️  Could not install Python MCP servers automatically."
+
+MCP_DATA=$(jq -n --arg pwd "$PROJECT_ROOT" --arg py "$PYTHON_EXE" '{
     "local-filesystem": { "command": "npx", "args": ["-y", "@modelcontextprotocol/server-filesystem", $pwd] },
-    "local-git": { "command": "npx", "args": ["-y", "@modelcontextprotocol/server-git", "--repository", $pwd] }
+    "local-git": { "command": $py, "args": ["-m", "mcp_server_git", "--repository", $pwd] },
+    "sequential-thinking": { "command": "npx", "args": ["-y", "@modelcontextprotocol/server-sequential-thinking"] },
+    "memory": { "command": "npx", "args": ["-y", "@modelcontextprotocol/server-memory"] },
+    "fetch": { "command": $py, "args": ["-m", "mcp_server_fetch"] }
 }')
 
 # Dynamic Stack Detection & MCP Injection
 if [ -f "$PROJECT_ROOT/package.json" ]; then
     if grep -q '"next"' "$PROJECT_ROOT/package.json"; then
-        echo "   + Next.js detected"
+        echo "   + Next.js detected (adding Playwright & Vercel MCP)"
+        MCP_DATA=$(echo "$MCP_DATA" | jq '. + {
+            "playwright": { "command": "npx", "args": ["-y", "@modelcontextprotocol/server-playwright"] },
+            "vercel": { "command": "npx", "args": ["-y", "vercel-mcp"] }
+        }')
+    fi
+    if grep -q '"prisma"' "$PROJECT_ROOT/package.json"; then
+        echo "   + Prisma detected (adding Prisma MCP)"
+        MCP_DATA=$(echo "$MCP_DATA" | jq '. + {
+            "prisma": { "command": "npx", "args": ["-y", "@prisma/mcp-server"] }
+        }')
     fi
     if [ -f "$PROJECT_ROOT/tailwind.config.js" ] || [ -f "$PROJECT_ROOT/tailwind.config.ts" ]; then
         echo "   + Tailwind CSS detected"
