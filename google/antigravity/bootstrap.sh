@@ -198,7 +198,7 @@ cat << 'EOF' > "$AG_KNOWLEDGE_PROJECT/coding-standards.md"
 ## Environment Awareness
 - REMOTE SERVER MODE: Headless Linux. No GUI. No desktop. SSH-safe outputs only.
 - ENV VARS FIRST: Config goes in env vars or .env files. Never hardcoded.
-- VENV MASTERY: If .venv exists, libraries are there. Use `pip show` to find source paths.
+- VENV MASTERY: If .venv exists, libraries are there. Use \`pip show\` to find source paths.
 EOF
     echo "📝 coding-standards.md created"
 fi
@@ -294,7 +294,7 @@ HOOK
         else
             cat << EOF > "$HOOK_FILE"
 #!/bin/bash
-$CMD
+\$CMD
 EOF
             chmod +x "$HOOK_FILE"
         fi
