@@ -29,8 +29,8 @@ if command -v infisical >/dev/null 2>&1; then
         echo "   This project depends on Infisical for Sentry, DigitalOcean, and OpenAI keys."
         echo "   Running without it will result in an incomplete/broken MCP configuration."
         echo ""
-        # Only prompt if stdin is a terminal
-        if [ -t 0 ]; then
+        # Only prompt if stdin is a terminal and not in non-interactive mode
+        if [ -t 0 ] && [ -z "$AG_NON_INTERACTIVE" ]; then
             printf "👉 Do you want to continue with potentially missing secrets? (y/N) "
             read -r REPLY
             echo ""
@@ -39,10 +39,16 @@ if command -v infisical >/dev/null 2>&1; then
                 exit 1
             fi
         else
-            echo "   (Non-interactive shell: continuing anyway, but expect missing configs)"
+            echo "   (Non-interactive shell or AG_NON_INTERACTIVE set: continuing anyway, but expect missing configs)"
         fi
     fi
 fi
+
+# ── Dynamic Path Detection ────────────────────────────────────────────────────
+PATH_POETRY=$(command -v poetry || echo "poetry")
+PATH_PYTHON=$(command -v python3 || command -v python || echo "python")
+PATH_NPM=$(command -v npm || echo "npm")
+PATH_INFISICAL=$(command -v infisical || echo "")
 
 AG_GLOBAL="$HOME/.gemini/antigravity"
 AG_KNOWLEDGE_GLOBAL="$AG_GLOBAL/knowledge"
@@ -50,11 +56,11 @@ MCP_CONFIG="$AG_GLOBAL/mcp_config.json"
 AG_PROJECT="$PROJECT_ROOT/.antigravity"
 AG_KNOWLEDGE_PROJECT="$AG_PROJECT/knowledge"
 
-mkdir -p "$AG_KNOWLEDGE_GLOBAL" "$AG_KNOWLEDGE_PROJECT" "$AG_PROJECT/workflows"
+mkdir -p "$AG_KNOWLEDGE_PROJECT" "$AG_PROJECT/workflows"
+mkdir -p "$AG_KNOWLEDGE_GLOBAL" 2>/dev/null || echo "⚠️ Global knowledge dir skipped (Read-only?)"
 
 # Detect script path relative to git root for hooks
 SCRIPT_PATH_FROM_ROOT=$(git ls-files --full-name "$0" 2>/dev/null || echo "$0")
-# Fix: SCRIPT_PATH_FROM_ROOT might have a leading ./ or be absolute
 if [ "${SCRIPT_PATH_FROM_ROOT%${SCRIPT_PATH_FROM_ROOT#?}}" = "/" ]; then
     SCRIPT_PATH_FROM_ROOT=$(realpath --relative-to="$PROJECT_ROOT" "$SCRIPT_PATH_FROM_ROOT")
 fi
@@ -107,11 +113,13 @@ PROJECT_STRUCTURE=$(find "$PROJECT_ROOT" -maxdepth 2 -type d \
 # ==============================================================================
 # STEP 2: stack-context.md → Global Knowledge (ephemeral, auto-generated)
 # ==============================================================================
+CURRENT_USER=$(whoami 2>/dev/null || echo "$USER")
+if [ -d "$AG_KNOWLEDGE_GLOBAL" ] && [ -w "$AG_KNOWLEDGE_GLOBAL" ]; then
 cat << EOF > "$AG_KNOWLEDGE_GLOBAL/stack-context.md"
 # Project Stack Context (Auto-Generated — DO NOT EDIT)
 ## Project
 Path: $PROJECT_ROOT
-User: $(whoami)
+User: $CURRENT_USER
 Venv: $VENV_STATUS
 
 ## Stack
@@ -123,9 +131,54 @@ $PROJECT_STRUCTURE
 \`\`\`
 EOF
 echo "📄 stack-context.md → $AG_KNOWLEDGE_GLOBAL"
+else
+    echo "⚠️  Skipping global stack-context.md (Directory not writable or missing)"
+fi
 
 # ==============================================================================
-# STEP 3: coding-standards.md → Project (versioned) + Symlink to Global
+# STEP 3: architecture-rules.md → Project (Dynamic Path Injection & Guardrails)
+# ==============================================================================
+echo "🔧 Injecting dynamic environment paths and strict rules..."
+
+cat << EOF > "$AG_KNOWLEDGE_PROJECT/architecture-rules.md"
+# ⚠️ STRICT RULES (TOKEN ECONOMY & PERFORMANCE)
+1. COGNITIVE LANGUAGE FORCING: If the user prompt is in Portuguese (or any non-English language), your VERY FIRST internal step MUST be to translate the intent to technical English. You must process all logic, architecture, and reasoning strictly in English.
+2. ZERO FLUFF: Output ONLY the modified or requested code. No conversational introductions, apologies, or verbose explanations.
+3. ALGORITHMIC COMPLEXITY: Strict O(N) or O(log N) maximum. O(N^2) is forbidden without prior architectural approval.
+4. JUST-IN-TIME CONTEXT: Never hallucinate file paths. Use the MCP (local-filesystem) to read config files before suggesting implementations.
+5. NO SILENT DELETION: Any removal of existing logic or configuration MUST be explicitly stated and approved by the user.
+6. STRUCTURAL CLEANLINESS: New code additions must be organized to avoid duplication and maintain structural integrity.
+
+## 0. Dynamic Binary Paths (Bypass Sandbox)
+These paths were discovered on this machine during bootstrap:
+- Python: $PATH_PYTHON
+- Poetry: $PATH_POETRY
+- NPM: $PATH_NPM
+- Infisical: ${PATH_INFISICAL:-"Not found"}
+
+### Infisical Usage:
+If Infisical is present, prefer running bootstrap or tools through it to ensure secrets are available:
+\`\`\`bash
+infisical run --env=dev -- bash .antigravity/bootstrap.sh
+\`\`\`
+
+### Execution Rules:
+- **Python Execution**: If running a script inside a virtual environment, ALWAYS prefer the local venv path (e.g., \`.venv/bin/python\`).
+- **Dependency Management**: Use Poetry if \`pyproject.toml\` is present, otherwise use pip.
+
+## 1. Project Patterns
+- **Database**: Supabase (PostgreSQL) with \`cortex\` schema.
+- **Worker**: Async loop processing \`inbox\` and \`outbox\` tables.
+- **Models**: Routed via \`AgentFactory\`.
+EOF
+
+echo "📝 architecture-rules.md created with paths and performance rules."
+if [ -d "$AG_KNOWLEDGE_GLOBAL" ] && [ -w "$AG_KNOWLEDGE_GLOBAL" ]; then
+    ln -sf "$AG_KNOWLEDGE_PROJECT/architecture-rules.md" "$AG_KNOWLEDGE_GLOBAL/architecture-rules.md"
+fi
+
+# ==============================================================================
+# STEP 4: coding-standards.md → Project (versioned) + Symlink to Global
 # ==============================================================================
 if [ ! -f "$AG_KNOWLEDGE_PROJECT/coding-standards.md" ]; then
 cat << 'EOF' > "$AG_KNOWLEDGE_PROJECT/coding-standards.md"
@@ -150,10 +203,12 @@ EOF
     echo "📝 coding-standards.md created"
 fi
 
-ln -sf "$AG_KNOWLEDGE_PROJECT/coding-standards.md" "$AG_KNOWLEDGE_GLOBAL/coding-standards.md"
+if [ -d "$AG_KNOWLEDGE_GLOBAL" ] && [ -w "$AG_KNOWLEDGE_GLOBAL" ]; then
+    ln -sf "$AG_KNOWLEDGE_PROJECT/coding-standards.md" "$AG_KNOWLEDGE_GLOBAL/coding-standards.md"
+fi
 
 # ==============================================================================
-# STEP 4: MCP Config → Merge into ~/.gemini/antigravity/mcp_config.json
+# STEP 5: MCP Config → Merge into ~/.gemini/antigravity/mcp_config.json
 # ==============================================================================
 echo "⚙️  Configuring MCP servers..."
 
@@ -209,7 +264,7 @@ fi
 echo "✅ MCP configured."
 
 # ==============================================================================
-# STEP 5: Evolutionary Git Hooks
+# STEP 6: Evolutionary Git Hooks
 # ==============================================================================
 if [ -d "$PWD/.git/hooks" ]; then
     echo "🔗 Wiring Git hooks..."
